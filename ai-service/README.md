@@ -1,8 +1,10 @@
 # SENTRI AI Microservice
 
 Binary voice distress classification, wrapping `final_model_v2`. Called
-synchronously by Laravel — see `DESIGN_DECISIONS.md` in the Obsidian vault
-for the full sync-vs-async and audio-transport reasoning.
+synchronously by Laravel — see `docs/decisions/13-ai-service-sync-contract.md`
+and `docs/decisions/14-real-model-integration-findings.md` for the full
+sync-vs-async and audio-transport reasoning, and `docs/API_CONTRACTS.md`
+for the general API contract.
 
 ## Contract summary
 
@@ -73,4 +75,4 @@ and its timeout/fallback behavior before the real model is wired in.
   insert after receiving this service's response.
 
 These boundaries are deliberate, not omissions — see
-`DESIGN_DECISIONS.md` if reconsidering any of them.
+`docs/decisions/13-ai-service-sync-contract.md` if reconsidering any of them.
