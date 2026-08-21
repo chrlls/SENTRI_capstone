@@ -12,25 +12,41 @@ use Illuminate\Validation\Rule;
 
 /**
  * docs/decisions/24-admin-provisioning-artisan-command.md — the only way
- * a 'pnp' or 'admin' row is ever created (Decision 19: no public
- * registration path for either role). Console-only by construction: an
- * Artisan command has no HTTP route, so this is unreachable over the
+ * an 'admin' row is ever created (Decision 19: no public registration
+ * path for that role). Narrowed to admin-only per the "Update: Narrowed
+ * to Admin-Only Bootstrapping" section of that decision — this is a
+ * one-time bootstrap mechanism, not a general provisioning tool. 'pnp'
+ * accounts are provisioned by an authenticated admin through a future
+ * in-dashboard screen, not this command. Console-only by construction:
+ * an Artisan command has no HTTP route, so this is unreachable over the
  * network regardless of what the dashboard/mobile clients expose.
  */
 class CreateAdminCommand extends Command
 {
     protected $signature = 'sentri:create-admin';
 
-    protected $description = 'Provision a PNP or system-admin account (no self-registration path exists for these roles)';
+    protected $description = 'Bootstrap a system-admin account (no self-registration path exists for this role)';
 
     public function handle(): int
     {
-        $this->info('SENTRI admin/PNP account provisioning');
+        $this->info('SENTRI admin account provisioning');
+
+        if (app()->environment('production')) {
+            $confirmed = $this->confirm(
+                sprintf('You are about to create an admin account in %s. Continue?', strtoupper(app()->environment())),
+                false,
+            );
+
+            if (! $confirmed) {
+                $this->warn('Aborted.');
+
+                return self::FAILURE;
+            }
+        }
 
         $email = $this->ask('Email');
         $phoneNumber = $this->ask('Phone number');
         $fullName = $this->ask('Full name');
-        $role = $this->choice('Role', ['pnp', 'admin']);
         $password = $this->secret('Password');
         $passwordConfirmation = $this->secret('Confirm password');
 
@@ -41,7 +57,6 @@ class CreateAdminCommand extends Command
                 'email' => $email,
                 'phone_number' => $phoneNumber,
                 'full_name' => $fullName,
-                'role' => $role,
                 'password' => $password,
                 'password_confirmation' => $passwordConfirmation,
             ],
@@ -49,7 +64,6 @@ class CreateAdminCommand extends Command
                 'email' => ['required', 'email', 'max:255', Rule::unique('users', 'email')],
                 'phone_number' => ['required', 'string', 'max:20', Rule::unique('users', 'phone_number')],
                 'full_name' => ['required', 'string', 'max:150'],
-                'role' => ['required', Rule::in(['pnp', 'admin'])],
                 'password' => ['required', 'string', 'min:8', 'confirmed'],
             ],
         );
@@ -69,16 +83,19 @@ class CreateAdminCommand extends Command
         try {
             // Provisioned accounts are active immediately — unlike a
             // self-registered responder, there is no verification step
-            // above an admin/PNP account; the admin role IS the verifier.
+            // above an admin account; the admin role IS the verifier.
             // agreement_accepted_at/agreement_version are left NULL:
             // Decision 18's mandatory User Agreement is an end-user
             // acknowledgment about submitting emergency reports, which
             // doesn't apply to an operator account created at a terminal.
+            // role is a hardcoded literal, never derived from input —
+            // there is no code path in this command that can produce
+            // anything other than 'admin'.
             $user = DB::selectOne(
                 <<<'SQL'
                 INSERT INTO users
                     (email, phone_number, password_hash, full_name, role, status)
-                VALUES (?, ?, ?, ?, ?, 'active')
+                VALUES (?, ?, ?, ?, 'admin', 'active')
                 RETURNING user_id, email, full_name, role
                 SQL,
                 [
@@ -86,7 +103,6 @@ class CreateAdminCommand extends Command
                     $data['phone_number'],
                     Hash::make($data['password']),
                     $data['full_name'],
-                    $data['role'],
                 ],
             );
         } catch (QueryException $e) {
