@@ -1,37 +1,248 @@
 import { useId, useState } from 'react'
-import { Eye, EyeOff, Loader2, MapPin, ShieldAlert, ShieldCheck, TriangleAlert, Users } from 'lucide-react'
 import { useAuth } from '@/hooks/use-auth'
 import { AuthError } from '@/lib/api'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 
-// Imported as a module (not referenced as a bare /public path) so Vite
-// fingerprints/optimizes it.
-import dispatchSkyline from '@/assets/dispatch-skyline.png'
+const EMAIL_PATTERN = /^\S+@\S+\.\S+$/
 
-const BRAND_FEATURES = [
-  {
-    icon: MapPin,
-    title: 'Live Incident Monitoring',
-    description: 'Track and visualize incidents as they happen.',
-    tint: 'text-primary bg-primary/10',
-  },
-  {
-    icon: Users,
-    title: 'Coordinated Response',
-    description: 'Dispatch responders and track their real-time status.',
-    tint: 'text-sky-400 bg-sky-400/10',
-  },
-  {
-    icon: ShieldCheck,
-    title: 'Community Safety',
-    description: 'Data-driven insights for a safer, more secure community.',
-    tint: 'text-emerald-400 bg-emerald-400/10',
-  },
-]
+// Plain CSS (not Tailwind) on purpose: the floating-label/underline pattern
+// below depends on sibling combinators (`:focus + label`, `~ .underline`)
+// and forced-state compound selectors (`.field.err .label`) that Tailwind
+// utilities can't express, and shadcn's Input/Label fight the animation.
+// Classes are prefixed to avoid colliding with any other global CSS in the app.
+const CSS = `
+.sentri-login-page {
+  min-height: 100vh;
+  width: 100%;
+  background: #0b0d13;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.sentri-login-stage {
+  width: 100%;
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  animation: sentri-login-rise 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes sentri-login-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.sentri-login-heading {
+  font-size: 26px;
+  font-weight: 300;
+  color: #f3f5f8;
+  letter-spacing: 0.01em;
+  margin-bottom: 4px;
+}
+
+.sentri-login-sub {
+  font-size: 12.5px;
+  color: #565f70;
+  margin-bottom: 44px;
+  text-align: center;
+}
+
+.sentri-login-form {
+  width: 100%;
+}
+
+.sentri-login-field {
+  width: 100%;
+  margin-bottom: 28px;
+  position: relative;
+}
+
+.sentri-login-label {
+  position: absolute;
+  left: 2px;
+  top: 9px;
+  font-size: 14.5px;
+  color: #4a5266;
+  pointer-events: none;
+  transform-origin: left top;
+  transition:
+    transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+    color 0.25s ease;
+}
+
+.sentri-login-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #232838;
+  padding: 8px 2px 10px;
+  font-size: 14.5px;
+  color: #f3f5f8;
+  outline: none;
+  font-family: inherit;
+  transition: border-color 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sentri-login-input::placeholder {
+  color: transparent;
+}
+
+.sentri-login-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.sentri-login-password-input {
+  padding-right: 28px;
+}
+
+.sentri-login-input:focus + .sentri-login-label,
+.sentri-login-field.filled .sentri-login-label {
+  transform: translateY(-22px) scale(0.78);
+  color: #6e93d6;
+}
+
+.sentri-login-underline {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 1px;
+  width: 0%;
+  background: #4c8df5;
+  transition: width 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sentri-login-input:focus ~ .sentri-login-underline,
+.sentri-login-field.filled .sentri-login-underline {
+  width: 100%;
+}
+
+.sentri-login-input.err {
+  border-color: #c15353;
+}
+
+.sentri-login-field.err .sentri-login-label {
+  color: #c15353;
+  transform: translateY(-22px) scale(0.78);
+}
+
+.sentri-login-field.err .sentri-login-underline {
+  background: #c15353;
+  width: 100%;
+}
+
+.sentri-login-toggle-pw {
+  position: absolute;
+  right: 2px;
+  top: 6px;
+  background: none;
+  border: none;
+  color: #4a5266;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  line-height: 0;
+  transition: color 0.2s ease;
+}
+
+.sentri-login-toggle-pw:hover {
+  color: #8a93a6;
+}
+
+.sentri-login-toggle-pw:disabled {
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+.sentri-login-form-err {
+  font-size: 11px;
+  color: #d18585;
+  margin: -16px 0 16px;
+  text-align: left;
+}
+
+.sentri-login-signin-btn {
+  width: 100%;
+  background: transparent;
+  border: 1px solid #263047;
+  color: #dce2ed;
+  border-radius: 6px;
+  padding: 12px;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  font-family: inherit;
+  cursor: pointer;
+  margin-top: 8px;
+  transition:
+    background 0.25s ease,
+    border-color 0.25s ease,
+    transform 0.1s ease;
+}
+
+.sentri-login-signin-btn:hover {
+  background: rgba(76, 141, 245, 0.08);
+  border-color: #3b5a8a;
+}
+
+.sentri-login-signin-btn:active {
+  transform: scale(0.99);
+}
+
+.sentri-login-signin-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+`
+
+function cx(...classNames) {
+  return classNames.filter(Boolean).join(' ')
+}
+
+function EyeIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  )
+}
+
+function EyeOffIcon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-7 0-11-7-11-7a18.36 18.36 0 0 1 4.22-5.06M9.9 4.24A10.94 10.94 0 0 1 12 4c7 0 11 7 11 7a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+      <line x1="1" y1="1" x2="23" y2="23" />
+    </svg>
+  )
+}
 
 export function DispatcherLoginPage() {
   const { login } = useAuth()
@@ -42,17 +253,40 @@ export function DispatcherLoginPage() {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [error, setError] = useState(null)
+  const [formError, setFormError] = useState(null)
+  const [fieldErrors, setFieldErrors] = useState({ email: false, password: false })
+
+  function handleEmailChange(event) {
+    setEmail(event.target.value)
+    setFieldErrors((prev) => (prev.email ? { ...prev, email: false } : prev))
+  }
+
+  function handlePasswordChange(event) {
+    setPassword(event.target.value)
+    setFieldErrors((prev) => (prev.password ? { ...prev, password: false } : prev))
+  }
 
   async function handleSubmit(event) {
     event.preventDefault()
-    setError(null)
+
+    const emailOk = EMAIL_PATTERN.test(email.trim())
+    const passwordOk = password !== ''
+
+    const nextFieldErrors = { email: !emailOk, password: !passwordOk }
+    setFieldErrors(nextFieldErrors)
+    if (nextFieldErrors.email || nextFieldErrors.password) {
+      return
+    }
+
+    setFormError(null)
     setIsSubmitting(true)
 
     try {
       await login(email, password)
     } catch (err) {
-      setError(
+      // Generic on purpose: never tell the caller whether the email or the
+      // password was the wrong part of the pair.
+      setFormError(
         err instanceof AuthError
           ? err.message
           : 'Unable to reach the server. Check your connection and try again.',
@@ -62,136 +296,66 @@ export function DispatcherLoginPage() {
     }
   }
 
+  const emailFilled = email.length > 0
+  const passwordFilled = password.length > 0
+
   return (
-    <div className="grid min-h-svh bg-background lg:grid-cols-2">
-      {/* Branding panel — hidden below lg, since a background image
-          fighting for space with a login form doesn't work on mobile */}
-      <div className="relative hidden overflow-hidden lg:flex lg:flex-col lg:justify-between lg:p-12">
-        <img
-          src={dispatchSkyline}
-          alt=""
-          role="presentation"
-          className="absolute inset-0 size-full object-cover"
-        />
-        {/* Scrim: darkens the photo so white text stays readable
-            everywhere, independent of what's underneath it */}
-        <div className="absolute inset-0 bg-gradient-to-t from-background via-background/70 to-background/20" />
+    <div className="sentri-login-page">
+      <style>{CSS}</style>
+      <div className="sentri-login-stage">
+        <h1 className="sentri-login-heading">Welcome</h1>
+        <p className="sentri-login-sub">Sign in to your account</p>
 
-        <div className="relative z-10 flex items-center gap-3">
-          <div className="flex size-11 items-center justify-center rounded-xl border border-primary/40 bg-primary/15 text-primary">
-            <ShieldAlert className="size-6" />
-          </div>
-          <div>
-            <div className="text-xl font-bold tracking-tight text-white">SENTRI</div>
-            <div className="text-xs font-medium tracking-widest text-white/60 uppercase">
-              Emergency Response System
-            </div>
-          </div>
-        </div>
-
-        <div className="relative z-10 flex flex-col gap-8">
-          <div className="flex flex-col gap-2">
-            <h1 className="text-3xl font-bold text-white">
-              Intelligent. Connected. Prepared.
-            </h1>
-            <p className="max-w-sm text-white/70">
-              Real-time monitoring, rapid response, safer communities.
-            </p>
+        <form className="sentri-login-form" onSubmit={handleSubmit} noValidate>
+          <div className={cx('sentri-login-field', emailFilled && 'filled', fieldErrors.email && 'err')}>
+            <input
+              id={emailId}
+              type="email"
+              placeholder="Email"
+              autoComplete="email"
+              value={email}
+              onChange={handleEmailChange}
+              disabled={isSubmitting}
+              className={cx('sentri-login-input', fieldErrors.email && 'err')}
+            />
+            <label htmlFor={emailId} className="sentri-login-label">
+              Email
+            </label>
+            <div className="sentri-login-underline" />
           </div>
 
-          <ul className="flex flex-col gap-5">
-            {BRAND_FEATURES.map(({ icon: Icon, title, description, tint }) => (
-              <li key={title} className="flex items-start gap-3.5">
-                <div className={`flex size-9 shrink-0 items-center justify-center rounded-lg ${tint}`}>
-                  <Icon className="size-4.5" />
-                </div>
-                <div>
-                  <div className="text-sm font-semibold text-white">{title}</div>
-                  <div className="text-sm text-white/60">{description}</div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
+          <div className={cx('sentri-login-field', passwordFilled && 'filled', fieldErrors.password && 'err')}>
+            <input
+              id={passwordId}
+              type={showPassword ? 'text' : 'password'}
+              placeholder="Password"
+              autoComplete="current-password"
+              value={password}
+              onChange={handlePasswordChange}
+              disabled={isSubmitting}
+              className={cx('sentri-login-input', 'sentri-login-password-input', fieldErrors.password && 'err')}
+            />
+            <label htmlFor={passwordId} className="sentri-login-label">
+              Password
+            </label>
+            <div className="sentri-login-underline" />
+            <button
+              type="button"
+              className="sentri-login-toggle-pw"
+              onClick={() => setShowPassword((visible) => !visible)}
+              disabled={isSubmitting}
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+            >
+              {showPassword ? <EyeOffIcon /> : <EyeIcon />}
+            </button>
+          </div>
 
-        <div className="relative z-10 text-xs text-white/40">
-          © {new Date().getFullYear()} SENTRI Emergency Response System. All rights reserved.
-        </div>
-      </div>
+          {formError !== null && <p className="sentri-login-form-err">{formError}</p>}
 
-      {/* Login panel — unchanged logic from here down, only the
-          outer wrapper changed (was: centered card on full width) */}
-      <div className="flex items-center justify-center px-4 py-12">
-        <Card className="w-full max-w-sm">
-          <CardHeader>
-            <div className="mb-1 flex items-center gap-2 text-primary lg:hidden">
-              <ShieldAlert className="size-5" />
-              <span className="text-xs font-semibold tracking-widest uppercase">SENTRI</span>
-            </div>
-            <CardTitle className="text-lg">Dispatcher Console</CardTitle>
-            <CardDescription>Sign in with your provisioned PNP or admin account.</CardDescription>
-          </CardHeader>
-
-          <CardContent>
-            <form className="flex flex-col gap-4" onSubmit={handleSubmit} noValidate>
-              {error !== null && (
-                <Alert variant="destructive">
-                  <TriangleAlert />
-                  <AlertTitle>Sign-in failed</AlertTitle>
-                  <AlertDescription>{error}</AlertDescription>
-                </Alert>
-              )}
-
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor={emailId}>Email</Label>
-                <Input
-                  id={emailId}
-                  type="email"
-                  autoComplete="username"
-                  required
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  disabled={isSubmitting}
-                />
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor={passwordId}>Password</Label>
-                <div className="relative">
-                  <Input
-                    id={passwordId}
-                    type={showPassword ? 'text' : 'password'}
-                    autoComplete="current-password"
-                    required
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    disabled={isSubmitting}
-                    className="pr-9"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((visible) => !visible)}
-                    disabled={isSubmitting}
-                    className="absolute inset-y-0 right-0 flex w-9 items-center justify-center text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-                    aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  >
-                    {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                  </button>
-                </div>
-              </div>
-
-              <Button type="submit" disabled={isSubmitting} className="mt-1">
-                {isSubmitting && <Loader2 className="animate-spin" />}
-                {isSubmitting ? 'Signing in…' : 'Sign in'}
-              </Button>
-            </form>
-          </CardContent>
-
-          <CardFooter className="text-xs text-muted-foreground">
-            Dispatcher access is provisioned by a system administrator. There is
-            no self-service registration for this console.
-          </CardFooter>
-        </Card>
+          <button type="submit" className="sentri-login-signin-btn" disabled={isSubmitting}>
+            {isSubmitting ? 'Signing in…' : 'Login'}
+          </button>
+        </form>
       </div>
     </div>
   )
