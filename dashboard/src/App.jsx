@@ -1,42 +1,40 @@
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from '@/contexts/AuthContext'
 import { useAuth } from '@/hooks/use-auth'
 import { DispatcherLoginPage } from '@/pages/DispatcherLoginPage'
-import { Button } from '@/components/ui/button'
+import { IncidentQueuePage } from '@/pages/IncidentQueuePage'
+import { IncidentDetailPage } from '@/pages/IncidentDetailPage'
+import { CreateDispatcherPage } from '@/pages/CreateDispatcherPage'
+import { ProtectedRoute } from '@/components/ProtectedRoute'
+import { AdminRoute } from '@/components/AdminRoute'
 
-function DispatcherHomePlaceholder() {
-  const { user, logout } = useAuth()
-
-  return (
-    <div className="flex min-h-svh flex-col items-center justify-center gap-4 bg-background px-4 text-center">
-      <p className="text-sm text-muted-foreground">Signed in as</p>
-      <p className="text-lg font-medium text-foreground">
-        {user.full_name} <span className="text-muted-foreground">({user.role})</span>
-      </p>
-      <p className="max-w-xs text-sm text-muted-foreground">
-        The incident queue and dispatcher console are not built yet — this is
-        a placeholder confirming the session is live.
-      </p>
-      <Button variant="outline" onClick={logout}>
-        Sign out
-      </Button>
-    </div>
-  )
-}
-
-function AuthGate() {
+/** An already-authenticated dispatcher visiting /login goes straight to the queue instead of seeing the form again. */
+function LoginRoute() {
   const { isAuthenticated, isLoading } = useAuth()
 
   if (isLoading) {
     return <div className="flex min-h-svh items-center justify-center bg-background" />
   }
 
-  return isAuthenticated ? <DispatcherHomePlaceholder /> : <DispatcherLoginPage />
+  return isAuthenticated ? <Navigate to="/" replace /> : <DispatcherLoginPage />
 }
 
 function App() {
   return (
     <AuthProvider>
-      <AuthGate />
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<LoginRoute />} />
+          <Route element={<ProtectedRoute />}>
+            <Route path="/" element={<IncidentQueuePage />} />
+            <Route path="/incidents/:id" element={<IncidentDetailPage />} />
+            <Route element={<AdminRoute />}>
+              <Route path="/admin/create-dispatcher" element={<CreateDispatcherPage />} />
+            </Route>
+          </Route>
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </BrowserRouter>
     </AuthProvider>
   )
 }

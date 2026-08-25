@@ -5,13 +5,17 @@ namespace App\Http\Controllers;
 use App\Actions\Incidents\ClassifyDistressAudio;
 use App\Actions\Incidents\CreateAiAssistedSosIncident;
 use App\Actions\Incidents\CreateManualSosIncident;
+use App\Actions\Incidents\GetIncidentDetail;
+use App\Actions\Incidents\ListIncidentsForUser;
 use App\Actions\Incidents\MatchRespondersToIncident;
 use App\Actions\Incidents\NotifyRespondersOfIncident;
 use App\Actions\Incidents\RecordVoiceAnalysisEvent;
+use App\Events\NewIncident;
 use App\Http\Requests\AiAssistedSosRequest;
 use App\Http\Requests\ManualSosRequest;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -45,10 +49,11 @@ class IncidentController extends Controller
             ], 500);
         }
 
-        // Incident already exists at this point — matching and
-        // notification are both downstream steps and must never turn a
-        // created incident into a failed request (docs/decisions/01, /05,
-        // /07).
+        // Incident already exists at this point — matching, notification,
+        // and the dashboard broadcast are all downstream steps and must
+        // never turn a created incident into a failed request
+        // (docs/decisions/01, /05, /07, /25).
+        $this->broadcastNewIncident($incident);
         $matchedResponders = $this->matchResponders($matchResponders, $incident->incident_id);
         $notifications = $this->notifyResponders($notifyResponders, $incident->incident_id, $matchedResponders['responders']);
 
@@ -94,7 +99,11 @@ class IncidentController extends Controller
 
         // Incident already exists at this point — nothing below this line
         // may cause the response to report anything other than success for
-        // the incident itself (docs/decisions/05, /13).
+        // the incident itself (docs/decisions/05, /13). The dashboard
+        // broadcast fires here too, same as manual-sos, before the AI call —
+        // the dashboard shouldn't wait on classification to learn an
+        // incident exists.
+        $this->broadcastNewIncident($incident);
         $classification = $classify->handle($request->file('audio'));
 
         $aiClassification = ['status' => $classification['status']];
@@ -145,6 +154,109 @@ class IncidentController extends Controller
             'matched_responders' => $matchedResponders,
             'notifications' => $notifications,
         ], 201);
+    }
+
+    /**
+     * Listing is scoped entirely inside ListIncidentsForUser's queries per
+     * docs/decisions/21-role-based-authorization.md — every role can call
+     * this endpoint, they just each see a different, already-restricted
+     * result set. There is no "cannot list at all" case (unlike incident
+     * creation), so no Gate check is needed here.
+     */
+    public function index(Request $request, ListIncidentsForUser $action): JsonResponse
+    {
+        $incidents = $action->handle($request->user());
+
+        return response()->json([
+            'incidents' => array_map($this->formatSummary(...), $incidents),
+        ], 200);
+    }
+
+    /**
+     * A civilian/responder requesting an incident outside their
+     * Decision-21 scope gets the same 404 as a nonexistent incident_id —
+     * chosen over 403 so an unauthorized caller can't distinguish "this
+     * incident doesn't exist" from "it exists but isn't yours," which would
+     * otherwise leak whether someone else has an active SOS report.
+     */
+    public function show(string $incidentId, Request $request, GetIncidentDetail $action): JsonResponse
+    {
+        $incident = $action->find($incidentId);
+
+        if ($incident === null || Gate::denies('view-incident', $incident)) {
+            return response()->json(['error' => 'Incident not found.'], 404);
+        }
+
+        $classification = $action->classification($incident->incident_id);
+        $notifications = $action->notifications($incident->incident_id);
+
+        return response()->json([
+            ...$this->formatSummary($incident),
+            'location_captured_at' => $incident->location_captured_at,
+            'dispatcher_notes' => $incident->dispatcher_notes,
+            'incident_notes' => $incident->incident_notes,
+            'ai_classification' => $classification === null ? null : [
+                'distress_label' => (bool) $classification->distress_label,
+                'distress_confidence' => (float) $classification->distress_confidence,
+                'model_version' => $classification->model_version,
+                'audio_storage_ref' => $classification->audio_storage_ref,
+                'analyzed_at' => $classification->analyzed_at,
+            ],
+            'notifications' => [
+                'pnp_dashboard' => $notifications['pnp_dashboard'] === null ? null : [
+                    'notification_id' => $notifications['pnp_dashboard']->notification_id,
+                    'delivery_status' => $notifications['pnp_dashboard']->delivery_status,
+                    'created_at' => $notifications['pnp_dashboard']->created_at,
+                ],
+                'barangay_tanod' => array_map(
+                    fn (object $n) => [
+                        'notification_id' => $n->notification_id,
+                        'responder_id' => $n->responder_id,
+                        'full_name' => $n->full_name,
+                        'distance_meters' => $n->distance_meters === null ? null : (float) $n->distance_meters,
+                        'delivery_status' => $n->delivery_status,
+                        'created_at' => $n->created_at,
+                    ],
+                    $notifications['barangay_tanod']
+                ),
+            ],
+        ], 200);
+    }
+
+    private function formatSummary(object $incident): array
+    {
+        return [
+            'incident_id' => $incident->incident_id,
+            'reporter_id' => $incident->reporter_id,
+            'trigger_source' => $incident->trigger_source,
+            'status' => $incident->status,
+            'incident_barangay_id' => $incident->incident_barangay_id,
+            'latitude' => (float) $incident->latitude,
+            'longitude' => (float) $incident->longitude,
+            'ai_confidence_score' => $incident->ai_confidence_score === null ? null : (float) $incident->ai_confidence_score,
+            'dispatched_by' => $incident->dispatched_by,
+            'dispatched_at' => $incident->dispatched_at,
+            'created_at' => $incident->created_at,
+            'updated_at' => $incident->updated_at,
+            'resolved_at' => $incident->resolved_at,
+        ];
+    }
+
+    /**
+     * Broadcasting is a downstream, best-effort step, same as matching and
+     * notification below: if Reverb is unreachable, that must never turn an
+     * already-created incident into a failed request.
+     */
+    private function broadcastNewIncident(object $incident): void
+    {
+        try {
+            event(new NewIncident($incident));
+        } catch (Throwable $e) {
+            Log::error('Failed to broadcast NewIncident event', [
+                'incident_id' => $incident->incident_id,
+                'exception' => $e,
+            ]);
+        }
     }
 
     /**
