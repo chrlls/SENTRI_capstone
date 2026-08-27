@@ -1,9 +1,9 @@
-import 'dart:math';
-import 'dart:ui' as ui;
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 
 import '../theme/sentri_colors.dart';
+import 'sos_particle_field.dart';
 
 /// Visual/interaction phase driven by the parent screen once the hold
 /// gesture itself completes — everything before completion (idle, the
@@ -12,33 +12,27 @@ import '../theme/sentri_colors.dart';
 enum SosButtonPhase { idle, sending, sent }
 
 const _diameter = 220.0;
-const _dotCount = 26;
+const _discRadius = _diameter / 2;
 
-class _HaloDot {
-  final double baseAngle;
-  final double angularDrift;
-  final double targetRadius;
-  final double size;
-
-  const _HaloDot({
-    required this.baseAngle,
-    required this.angularDrift,
-    required this.targetRadius,
-    required this.size,
-  });
-}
-
-/// The reference design's hand-drawn "SOS in a scattered dot halo" is
-/// reinterpreted per the project owner's confirmed direction: a precise
-/// circle at rest (unambiguous tap target under stress), with the
-/// reference's loose/organic energy expressed only through the
-/// press-and-hold animation, not baked into the idle shape. Holding for
-/// [holdDuration] fires [onHoldComplete]; releasing early reverses the
-/// animation and fires nothing.
+/// Holding for [holdDuration] fires [onHoldComplete]; releasing early
+/// reverses the animation and fires nothing. Progress during the hold is
+/// communicated entirely by [SosParticleFieldPainter]'s emission-based
+/// particle field. The button's size and position never change across
+/// phases — only the color (on confirmation) and the center content
+/// change. (An earlier version of this widget shrank the disc into a small
+/// pulsing dot during the sending phase; that concept was a misreading of
+/// the actual request and has been fully removed — the button stays fixed
+/// size/position always.)
 class HoldToConfirmSosButton extends StatefulWidget {
   final SosButtonPhase phase;
   final VoidCallback onHoldComplete;
   final Duration holdDuration;
+
+  /// Duration of the full "sent" success transition (disc + particle field
+  /// crossfading to green, checkmark entrance). Exposed so callers that
+  /// chain further navigation after a successful send can wait for this
+  /// exact duration rather than guessing a disconnected magic number.
+  static const Duration sentAnimationDuration = Duration(milliseconds: 650);
 
   const HoldToConfirmSosButton({
     super.key,
@@ -55,7 +49,7 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
     with TickerProviderStateMixin {
   late final AnimationController _holdController;
   late final AnimationController _sentBurstController;
-  late final List<_HaloDot> _dots;
+  late final List<SosParticle> _particles;
 
   @override
   void initState() {
@@ -66,23 +60,10 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
 
     _sentBurstController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 500),
+      duration: HoldToConfirmSosButton.sentAnimationDuration,
     );
 
-    // Precomputed once, not per frame or per rebuild — a fixed seed keeps
-    // the scatter pattern stable across rebuilds within the same press,
-    // while still reading as organic/hand-scattered rather than a
-    // perfectly even ring of dots.
-    final random = Random(7);
-    _dots = List.generate(_dotCount, (i) {
-      final baseAngle = (2 * pi / _dotCount) * i;
-      return _HaloDot(
-        baseAngle: baseAngle,
-        angularDrift: (random.nextDouble() - 0.5) * 0.6,
-        targetRadius: _diameter / 2 + 18 + random.nextDouble() * 46,
-        size: 2.5 + random.nextDouble() * 3.5,
-      );
-    });
+    _particles = generateSosParticles();
   }
 
   void _handleHoldStatusChanged(AnimationStatus status) {
@@ -143,20 +124,29 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
         child: AnimatedBuilder(
           animation: Listenable.merge([_holdController, _sentBurstController]),
           builder: (context, _) {
+            final phase = widget.phase;
+            final sentBurst = _sentBurstController.value;
+            final confirmProgress =
+                phase == SosButtonPhase.sent ? Curves.easeInOut.transform((sentBurst / 0.6).clamp(0.0, 1.0)) : 0.0;
+
             return CustomPaint(
               painter: _SosButtonPainter(
                 holdProgress: _holdController.value,
-                sentBurst: _sentBurstController.value,
-                phase: widget.phase,
-                dots: _dots,
-                showDots: !reduceMotion,
+                confirmProgress: confirmProgress,
+                phase: phase,
+                particles: _particles,
+                reduceMotion: reduceMotion,
               ),
               child: Center(
                 child: SizedBox(
                   width: _diameter,
                   height: _diameter,
                   child: Center(
-                    child: _ButtonLabel(phase: widget.phase, holdProgress: _holdController.value),
+                    child: _ButtonLabel(
+                      phase: phase,
+                      holdProgress: _holdController.value,
+                      sentBurst: sentBurst,
+                    ),
                   ),
                 ),
               ),
@@ -171,31 +161,65 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
 class _ButtonLabel extends StatelessWidget {
   final SosButtonPhase phase;
   final double holdProgress;
+  final double sentBurst;
 
-  const _ButtonLabel({required this.phase, required this.holdProgress});
+  const _ButtonLabel({
+    required this.phase,
+    required this.holdProgress,
+    required this.sentBurst,
+  });
 
   @override
   Widget build(BuildContext context) {
     switch (phase) {
       case SosButtonPhase.sending:
-        return const SizedBox(
-          width: 36,
-          height: 36,
-          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 3),
+        // Replaces the old spinner in place, at the button's normal
+        // size — no resize, no separate loading indicator. The cycling
+        // subtext's own cross-fade is the only motion here.
+        return const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Sending your\nalert...',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700, height: 1.25),
+              ),
+              SizedBox(height: 8),
+              _CyclingSubtext(
+                phrases: ['Reaching emergency\nresponders', 'Confirming your\nlocation'],
+              ),
+            ],
+          ),
         );
       case SosButtonPhase.sent:
-        return const Text(
-          'SOS SENT',
-          style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+        // Enters 65ms into the 650ms success burst, over ~228ms — icon and
+        // text arrive together as one unit, since the red->green color
+        // change alone must not be the only signal that this succeeded.
+        final labelT = Curves.easeOutCubic.transform(((sentBurst - 0.1) / 0.35).clamp(0.0, 1.0));
+        return Opacity(
+          opacity: labelT,
+          child: Transform.scale(
+            scale: 0.85 + labelT * 0.15,
+            child: const Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.check_rounded, color: Colors.white, size: 28),
+                SizedBox(height: 6),
+                Text(
+                  'SOS SENT',
+                  style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+                ),
+              ],
+            ),
+          ),
         );
       case SosButtonPhase.idle:
         return Text(
           holdProgress > 0.02 ? 'HOLD…' : 'HOLD TO\nSEND SOS',
           textAlign: TextAlign.center,
           style: const TextStyle(
-            // White, not textPrimary: the disc is solid primaryRed in
-            // every phase now (idle included), so the label needs to
-            // read against red, same as the sending/sent labels below.
             color: Colors.white,
             fontSize: 18,
             fontWeight: FontWeight.w600,
@@ -206,97 +230,116 @@ class _ButtonLabel extends StatelessWidget {
   }
 }
 
+/// Cycles through short atmospheric phrases while genuinely waiting on the
+/// backend — a `Timer` + `AnimatedSwitcher` crossfade, not a restart of the
+/// button's own animation tree just to swap text. Purely atmospheric: there
+/// is no partial-progress data from a single SOS submission, so this never
+/// implies a real step count. Lives inside the button (not the surrounding
+/// screen) since the sending-phase content renders in place of the old
+/// spinner, at the button's own size.
+class _CyclingSubtext extends StatefulWidget {
+  final List<String> phrases;
+
+  const _CyclingSubtext({required this.phrases});
+
+  @override
+  State<_CyclingSubtext> createState() => _CyclingSubtextState();
+}
+
+class _CyclingSubtextState extends State<_CyclingSubtext> {
+  int _index = 0;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(milliseconds: 1350), (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _index = (_index + 1) % widget.phrases.length);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 300),
+      child: Text(
+        widget.phrases[_index],
+        key: ValueKey(_index),
+        textAlign: TextAlign.center,
+        style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.3),
+      ),
+    );
+  }
+}
+
 class _SosButtonPainter extends CustomPainter {
   final double holdProgress;
-  final double sentBurst;
+  final double confirmProgress;
   final SosButtonPhase phase;
-  final List<_HaloDot> dots;
-  final bool showDots;
+  final List<SosParticle> particles;
+  final bool reduceMotion;
 
   _SosButtonPainter({
     required this.holdProgress,
-    required this.sentBurst,
+    required this.confirmProgress,
     required this.phase,
-    required this.dots,
-    required this.showDots,
+    required this.particles,
+    required this.reduceMotion,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
-    final radius = _diameter / 2;
-    final eased = Curves.easeOutCubic.transform(holdProgress);
+    const radius = _discRadius;
 
-    // Soft halo behind the disc, always visible (not gated on phase or
-    // hold progress) — the reference image's layered soft-glow-around-
-    // a-solid-badge look. Drawn before the disc so only the portion
-    // outside the disc's radius reads as a visible ring.
-    canvas.drawCircle(center, radius + 50, Paint()..color = SentriColors.glowOuter);
-    canvas.drawCircle(center, radius + 25, Paint()..color = SentriColors.glowInner);
+    // Soft halo behind the disc, always visible — the same layered-glow
+    // treatment as before, crossfading to green on confirmation (same
+    // shortest-arc hue path as the disc/particles, so nothing red-toned is
+    // left behind once the disc has turned).
+    final glowOuter = confirmProgress <= 0
+        ? SentriColors.glowOuter
+        : lerpWarmToSafeColor(SentriColors.glowOuter, SentriColors.success.withValues(alpha: 0.08), confirmProgress);
+    final glowInner = confirmProgress <= 0
+        ? SentriColors.glowInner
+        : lerpWarmToSafeColor(SentriColors.glowInner, SentriColors.success.withValues(alpha: 0.16), confirmProgress);
+    canvas.drawCircle(center, radius + 50, Paint()..color = glowOuter);
+    canvas.drawCircle(center, radius + 25, Paint()..color = glowInner);
 
-    // The disc is solid primaryRed in every phase (idle included) per
-    // the reference image — state is communicated by the ring/dots, not
-    // by the disc itself changing color. Always a precise circle, never
-    // distorted, so the tap target stays unambiguous.
-    canvas.drawCircle(center, radius, Paint()..color = SentriColors.primaryRed);
+    // The disc is a precise, undistorted circle in every phase — shape,
+    // size, and position never change, only color. `lerpWarmToSafeColor`
+    // (a hand-rolled shortest-arc hue interpolation, not the built-in
+    // `HSVColor.lerp` — see sos_particle_field.dart's doc comment for why)
+    // sweeps through orange/yellow at the midpoint instead of the muddy
+    // brown a direct RGB lerp gives, or the teal/cyan `HSVColor.lerp`
+    // itself gives — both confirmed by rendering, not assumed.
+    final discColor = confirmProgress <= 0
+        ? SentriColors.primaryRed
+        : lerpWarmToSafeColor(SentriColors.primaryRed, SentriColors.success, confirmProgress);
+    canvas.drawCircle(center, radius, Paint()..color = discColor);
 
-    // Progress ring, filling in as the hold nears completion. A solid
-    // primaryRed arc alone was tested against white and found to nearly
-    // vanish — it's the same hue as both the disc it sits next to and
-    // the glow ring underneath it, so "how much has filled in" wasn't
-    // legible (confirmed by rendering, not assumed). A neutral gray
-    // track underneath the red fill gives the ring real contrast
-    // regardless of what's behind it, same convention as a typical
-    // circular progress indicator.
-    if (phase == SosButtonPhase.idle && holdProgress > 0) {
-      final ringRect = Rect.fromCircle(center: center, radius: radius + 14);
-
-      final trackPaint = Paint()
-        ..color = const Color(0xFFE3E3E6)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 6;
-      canvas.drawCircle(center, radius + 14, trackPaint);
-
-      final fillPaint = Paint()
-        ..color = SentriColors.primaryRed
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 6
-        ..strokeCap = StrokeCap.round;
-      canvas.drawArc(ringRect, -pi / 2, 2 * pi * eased, false, fillPaint);
-    }
-
-    if (showDots) {
-      _paintHalo(canvas, center, eased);
-    }
-  }
-
-  void _paintHalo(Canvas canvas, Offset center, double eased) {
-    final scatter = phase == SosButtonPhase.sent ? 1.0 + sentBurst * 0.35 : eased;
-    if (scatter <= 0.001) {
-      return;
-    }
-
-    final opacity = phase == SosButtonPhase.sent
-        ? (1 - sentBurst * 0.6).clamp(0.0, 1.0)
-        : (eased * 0.9).clamp(0.0, 1.0);
-
-    for (final dot in dots) {
-      final angle = dot.baseAngle + dot.angularDrift * scatter;
-      final dist = (_diameter / 2) + (dot.targetRadius - _diameter / 2) * scatter;
-      final position = center + Offset(cos(angle), sin(angle)) * dist;
-
-      canvas.drawCircle(
-        position,
-        dot.size * ui.clampDouble(0.4 + scatter * 0.6, 0, 1),
-        Paint()..color = SentriColors.sosAlarm.withValues(alpha: opacity),
-      );
-    }
+    SosParticleFieldPainter(
+      particles: particles,
+      holdProgress: holdProgress,
+      confirmProgress: confirmProgress,
+      discRadius: radius,
+      reduceMotion: reduceMotion,
+    ).paint(canvas, size);
   }
 
   @override
   bool shouldRepaint(covariant _SosButtonPainter oldDelegate) {
     return oldDelegate.holdProgress != holdProgress ||
-        oldDelegate.sentBurst != sentBurst ||
-        oldDelegate.phase != phase;
+        oldDelegate.confirmProgress != confirmProgress ||
+        oldDelegate.phase != phase ||
+        oldDelegate.reduceMotion != reduceMotion;
   }
 }

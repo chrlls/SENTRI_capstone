@@ -180,11 +180,13 @@ class _SosScreenState extends State<SosScreen> with WidgetsBindingObserver {
     }
     setState(() => _phase = SosButtonPhase.sent);
 
-    // Lets the "sent" dot-burst actually play before immediately chaining
-    // into the voice flow (Phase 3's "no intermediate menu" requirement,
-    // balanced against not cutting the send-confirmation moment off mid-
-    // animation).
-    await Future.delayed(const Duration(milliseconds: 700));
+    // Lets the green checkmark/color-crossfade success animation actually
+    // finish playing before immediately chaining into the voice flow
+    // (Phase 3's "no intermediate menu" requirement, balanced against not
+    // cutting the send-confirmation moment off mid-animation). Sourced
+    // from the widget's own constant, padded by 200ms, so this can't
+    // silently drift out of sync with the animation it's waiting on.
+    await Future.delayed(HoldToConfirmSosButton.sentAnimationDuration + const Duration(milliseconds: 200));
     if (!mounted) {
       return;
     }
