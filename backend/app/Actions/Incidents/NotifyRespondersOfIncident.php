@@ -48,8 +48,6 @@ class NotifyRespondersOfIncident
                 SQL,
                 [$incidentId]
             );
-
-            return ['status' => 'completed', 'notification_id' => $row->notification_id];
         } catch (Throwable $e) {
             Log::error('Failed to create PNP dashboard notification', [
                 'incident_id' => $incidentId,
@@ -57,6 +55,43 @@ class NotifyRespondersOfIncident
             ]);
 
             return ['status' => 'failed'];
+        }
+
+        $this->markDashboardAlerted($incidentId);
+
+        return ['status' => 'completed', 'notification_id' => $row->notification_id];
+    }
+
+    /**
+     * docs/decisions/29-dispatcher-status-updates.md, adopted via 27's
+     * reconciliation addendum: the pnp_dashboard notification succeeding
+     * *is* the dashboard_alerted event (schema.sql's own enum comment:
+     * "PNP dashboard notified, immediate, no delay") — this only makes
+     * incidents.status reflect that real event, which previously happened
+     * silently with nothing ever recording it. System-driven, so
+     * trg_incident_status_history logs it with changed_by NULL (the
+     * trigger never sets changed_by on any row it inserts — see
+     * UpdateIncidentStatus for the human-transition case). Guarded to
+     * WHERE status = 'detected' so this is a no-op if ever reached for an
+     * incident already moved past it. Isolated in its own try/catch so a
+     * failure here can never fail the notification that already
+     * succeeded (docs/decisions/05/13's "never block the incident"
+     * principle) — logged, not rethrown, and not surfaced in this
+     * method's return shape since that's the public notification
+     * contract documented in API_CONTRACTS.md.
+     */
+    private function markDashboardAlerted(string $incidentId): void
+    {
+        try {
+            DB::update(
+                "UPDATE incidents SET status = 'dashboard_alerted' WHERE incident_id = ? AND status = 'detected'",
+                [$incidentId]
+            );
+        } catch (Throwable $e) {
+            Log::error('Failed to auto-transition incident to dashboard_alerted', [
+                'incident_id' => $incidentId,
+                'exception' => $e,
+            ]);
         }
     }
 

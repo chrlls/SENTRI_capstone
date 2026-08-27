@@ -52,4 +52,18 @@ class IncidentPolicy
             ->where('notified_user_id', $responderId)
             ->exists();
     }
+
+    /**
+     * Per docs/decisions/27-dispatcher-incident-actions.md: only a human
+     * PNP dispatcher or admin may move an incident's status — a civilian
+     * or responder can never change it, including their own incident.
+     * Role-only, unlike view() above: doesn't depend on which incident,
+     * so it's cheap to check ahead of any incident lookup (see
+     * UpdateIncidentStatusRequest::authorize() for why that ordering
+     * matters here specifically).
+     */
+    public function updateStatus(User $user): bool
+    {
+        return in_array($user->role, ['pnp', 'admin'], true);
+    }
 }

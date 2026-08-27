@@ -10,9 +10,11 @@ use App\Actions\Incidents\ListIncidentsForUser;
 use App\Actions\Incidents\MatchRespondersToIncident;
 use App\Actions\Incidents\NotifyRespondersOfIncident;
 use App\Actions\Incidents\RecordVoiceAnalysisEvent;
+use App\Actions\Incidents\UpdateIncidentStatus;
 use App\Events\NewIncident;
 use App\Http\Requests\AiAssistedSosRequest;
 use App\Http\Requests\ManualSosRequest;
+use App\Http\Requests\UpdateIncidentStatusRequest;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -220,6 +222,44 @@ class IncidentController extends Controller
                     $notifications['barangay_tanod']
                 ),
             ],
+        ], 200);
+    }
+
+    /**
+     * Authorization already happened inside UpdateIncidentStatusRequest's
+     * own authorize() — deliberately not a controller-side
+     * Gate::authorize() call here like every other authorized endpoint in
+     * this app; see that class's docblock for why (its transition
+     * validation needs to look up this specific incident, and doing that
+     * before authorization would leak incident state to an unauthorized
+     * caller). Transition validity was also already checked there.
+     */
+    public function updateStatus(
+        string $incidentId,
+        UpdateIncidentStatusRequest $request,
+        UpdateIncidentStatus $action,
+        GetIncidentDetail $detail,
+    ): JsonResponse {
+        $data = $request->validated();
+
+        $updated = $action->handle(
+            incident: $request->incident(),
+            status: $data['status'],
+            dispatcherNotes: $data['dispatcher_notes'] ?? null,
+            dispatcherId: $request->user()->user_id,
+        );
+
+        // formatSummary() expects latitude/longitude already computed via
+        // ST_Y/ST_X (GetIncidentDetail's raw-SQL shape) — the Eloquent
+        // model $action just saved only has the raw `location` geography
+        // column, so the response is re-fetched through the same path
+        // every other read endpoint uses rather than reshaping PostGIS
+        // output by hand here.
+        $incident = $detail->find($updated->incident_id);
+
+        return response()->json([
+            ...$this->formatSummary($incident),
+            'dispatcher_notes' => $incident->dispatcher_notes,
         ], 200);
     }
 

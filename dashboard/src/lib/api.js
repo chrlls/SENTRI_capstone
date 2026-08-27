@@ -142,6 +142,35 @@ export async function fetchIncident(incidentId) {
 }
 
 /**
+ * pnp/admin-only server-side (Decision 27's 'update-incident-status'
+ * Gate, enforced inside UpdateIncidentStatusRequest itself rather than
+ * the controller — see that class for why). dispatcherNotes is only
+ * sent when non-empty; the backend leaves the column untouched when the
+ * field is omitted rather than overwriting it with an empty string.
+ */
+export async function updateIncidentStatus(incidentId, status, dispatcherNotes) {
+  await ensureCsrfCookie()
+
+  const body = { status }
+  if (dispatcherNotes) {
+    body.dispatcher_notes = dispatcherNotes
+  }
+
+  const response = await apiRequest(`/api/incidents/${incidentId}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  })
+
+  const data = await response.json().catch(() => null)
+
+  if (!response.ok) {
+    throw new ApiError(data?.message ?? 'Failed to update incident status.', response.status)
+  }
+
+  return data
+}
+
+/**
  * Admin-only server-side (Decision 26's 'create-dispatcher' Gate); this
  * client-side call succeeding or failing doesn't determine access, that
  * Gate does. Never issues a token — the new dispatcher logs in separately.

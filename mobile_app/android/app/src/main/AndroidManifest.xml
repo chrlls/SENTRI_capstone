@@ -1,4 +1,16 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Required by geolocator to acquire the device's position for the
+         manual SOS trigger (docs/decisions/28-flutter-manual-sos-mvp.md).
+         COARSE is a fallback if FINE is ever denied but coarse isn't;
+         geolocator's runtime permission flow still prompts the user
+         regardless of what's declared here. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <!-- Required by the `record` package for the voice-assisted SOS flow
+         that follows a manual SOS send (ai-assisted-sos, API_CONTRACTS.md).
+         The `record` plugin requests this at runtime itself; declaring it
+         here is what makes that runtime prompt possible at all. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <application
         android:label="mobile_app"
         android:name="${applicationName}"

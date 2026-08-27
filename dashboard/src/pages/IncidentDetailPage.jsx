@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, SearchX } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { DispatcherHeader } from '@/components/DispatcherHeader'
 import { IncidentMap } from '@/components/IncidentMap'
+import { IncidentStatusActions } from '@/components/IncidentStatusActions'
 import { ApiError, fetchIncident } from '@/lib/api'
 import { humanizeEnum } from '@/lib/utils'
 
@@ -108,7 +109,7 @@ function NotificationsSection({ notifications }) {
   )
 }
 
-function IncidentDetailContent({ incident }) {
+function IncidentDetailContent({ incident, onUpdated }) {
   return (
     <div className="flex flex-1 overflow-hidden">
       <div className="flex w-[26rem] shrink-0 flex-col gap-6 overflow-y-auto border-r border-border p-6">
@@ -116,6 +117,8 @@ function IncidentDetailContent({ incident }) {
           <Badge variant="destructive">{humanizeEnum(incident.status)}</Badge>
           <span className="text-sm text-muted-foreground">{humanizeEnum(incident.trigger_source)}</span>
         </div>
+
+        <IncidentStatusActions incident={incident} onUpdated={onUpdated} />
 
         <dl className="grid grid-cols-2 gap-4">
           <Field label="Incident ID">
@@ -199,6 +202,15 @@ function IncidentDetailLoader({ id }) {
     }
   }, [id, navigate])
 
+  // The PATCH response is the narrower read-endpoint summary shape (per
+  // API_CONTRACTS.md), not the full detail shape this page already holds
+  // (it has no ai_classification/notifications/location_captured_at/
+  // incident_notes) — merge rather than replace, or those sections would
+  // go blank after the first status change.
+  const handleUpdated = useCallback((updated) => {
+    setIncident((current) => ({ ...current, ...updated }))
+  }, [])
+
   return (
     <div className="flex h-svh flex-col bg-background">
       <DispatcherHeader />
@@ -211,7 +223,7 @@ function IncidentDetailLoader({ id }) {
       {incident === null && !notFound && error === null && <DetailLoadingState />}
       {notFound && <DetailNotFoundState />}
       {error !== null && <DetailErrorState message={error} />}
-      {incident !== null && <IncidentDetailContent incident={incident} />}
+      {incident !== null && <IncidentDetailContent incident={incident} onUpdated={handleUpdated} />}
     </div>
   )
 }

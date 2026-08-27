@@ -29,6 +29,7 @@ class AppServiceProvider extends ServiceProvider
         Gate::define('create-incident', [IncidentPolicy::class, 'create']);
         Gate::define('view-incident', [IncidentPolicy::class, 'view']);
         Gate::define('create-dispatcher', [UserPolicy::class, 'createDispatcher']);
+        Gate::define('update-incident-status', [IncidentPolicy::class, 'updateStatus']);
 
         // Loaded directly (not via withRouting()'s `channels:` param, which
         // would also auto-register its own '/broadcasting/auth' route under
