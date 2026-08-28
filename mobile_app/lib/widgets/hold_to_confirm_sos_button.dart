@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:math' show cos, pi;
 
 import 'package:flutter/material.dart';
@@ -42,6 +41,14 @@ const _discRadius = _diameter / 2;
 class HoldToConfirmSosButton extends StatefulWidget {
   final SosButtonPhase phase;
   final VoidCallback onHoldComplete;
+
+  /// Reports the real (Stopwatch-derived) hold fraction 0..1 as it changes,
+  /// and `0` the instant a hold is cancelled or reset. Lets the parent
+  /// screen show its own "Release to cancel" affordance alongside the
+  /// percentage the button paints in its centre. Never fed back into the
+  /// gate.
+  final ValueChanged<double>? onHoldProgress;
+
   final Duration holdDuration;
 
   /// Duration of the full "sent" success transition (disc + particle field
@@ -54,6 +61,7 @@ class HoldToConfirmSosButton extends StatefulWidget {
     super.key,
     required this.phase,
     required this.onHoldComplete,
+    this.onHoldProgress,
     this.holdDuration = const Duration(milliseconds: 2500),
   });
 
@@ -208,7 +216,15 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
       _completeHold();
       return;
     }
-    setState(() => _holdProgress = progress);
+    _setHoldProgress(progress);
+  }
+
+  /// Single place the hold fraction is written — keeps the parent's
+  /// [HoldToConfirmSosButton.onHoldProgress] mirror in lockstep with the
+  /// value the button paints.
+  void _setHoldProgress(double value) {
+    setState(() => _holdProgress = value);
+    widget.onHoldProgress?.call(value);
   }
 
   /// When the decorative fade-back finishes, park the emission clock and
@@ -234,7 +250,7 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
     _holdTicker.stop();
     HapticFeedback.heavyImpact();
     _pressController.reverse();
-    setState(() => _holdProgress = 1.0);
+    _setHoldProgress(1.0);
     widget.onHoldComplete();
   }
 
@@ -284,6 +300,7 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
       _holdTicker.stop();
       _holdProgress = 0;
       _holdCompleted = false;
+      widget.onHoldProgress?.call(0);
       _sentBurstController.value = 0;
       _emissionController.stop();
       _emissionController.value = 0;
@@ -305,6 +322,13 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
   }
 
   void _onPointerDown(PointerDownEvent _) {
+    // A pointer event can still be routed here after this State is torn
+    // down — the framework delivers up/cancel to the original down-target
+    // even once it's off-screen. Touching a disposed AnimationController
+    // then asserts.
+    if (!mounted) {
+      return;
+    }
     // Ignore a second finger while a hold is already running, and any
     // touch once the gesture is out of the idle phase.
     if (widget.phase != SosButtonPhase.idle || _holdWatch.isRunning) {
@@ -336,6 +360,10 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
   }
 
   void _onPointerUp(PointerEvent _) {
+    // See _onPointerDown: a queued up/cancel can arrive after disposal.
+    if (!mounted) {
+      return;
+    }
     if (_holdWatch.isRunning) {
       // Released before the full duration elapsed — cancel. A soft
       // "nothing sent" tap, distinct from the heavy impact a real send
@@ -363,7 +391,7 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
         _cancelFillFrom = fillAtCancel;
         _cancelDecayController.forward(from: 0);
       }
-      setState(() => _holdProgress = 0);
+      _setHoldProgress(0);
     }
     _pressController.reverse();
   }
@@ -496,38 +524,44 @@ class _ButtonLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     switch (phase) {
       case SosButtonPhase.sending:
-        // Replaces the old spinner in place, at the button's normal
-        // size — no resize, no separate loading indicator. The cycling
-        // subtext's own cross-fade is the only motion here.
+        // Screen 3 (Decision 31): a truthful "sending" state — no rotating
+        // atmospheric phrases (those implied progress that wasn't measured
+        // and kept reassuring during a stalled send; audit 1.6/R2). The
+        // GPS/Network/Alert row below the button carries the real detail.
         return const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 20),
+          padding: EdgeInsets.symmetric(horizontal: 18),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              Icon(Icons.send_rounded, color: Colors.white, size: 24),
+              SizedBox(height: 6),
               Text(
-                'Sending your\nalert...',
+                'SENDING SOS',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.white,
-                  fontSize: 16,
+                  fontSize: 15,
                   fontWeight: FontWeight.w700,
-                  height: 1.25,
+                  letterSpacing: 1.0,
                 ),
               ),
-              SizedBox(height: 8),
-              _CyclingSubtext(
-                phrases: [
-                  'Reaching emergency\nresponders',
-                  'Confirming your\nlocation',
-                ],
+              SizedBox(height: 4),
+              Text(
+                'Sharing your location\nwith responders',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 11,
+                  height: 1.25,
+                ),
               ),
             ],
           ),
         );
       case SosButtonPhase.sent:
-        // Enters 65ms into the 650ms success burst, over ~228ms — icon and
-        // text arrive together as one unit, since the red->green color
-        // change alone must not be the only signal that this succeeded.
+        // Screen 4 — persists. Enters 65ms into the 650ms success burst so
+        // the icon and text arrive as one unit, since the red->green
+        // colour change alone must not be the only "it worked" signal.
         final labelT = Curves.easeOutCubic.transform(
           ((sentBurst - 0.1) / 0.35).clamp(0.0, 1.0),
         );
@@ -535,29 +569,71 @@ class _ButtonLabel extends StatelessWidget {
           opacity: labelT,
           child: Transform.scale(
             scale: 0.85 + labelT * 0.15,
-            child: const Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.check_rounded, color: Colors.white, size: 28),
-                SizedBox(height: 6),
-                Text(
-                  'SOS SENT',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.2,
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 18),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.check_rounded, color: Colors.white, size: 26),
+                  SizedBox(height: 6),
+                  Text(
+                    'SOS CONFIRMED',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.0,
+                    ),
                   ),
-                ),
-              ],
+                  SizedBox(height: 4),
+                  Text(
+                    'Your emergency alert\nhas been received.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 10,
+                      height: 1.25,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         );
       case SosButtonPhase.idle:
-        return Text(
-          holdProgress > 0.02 ? 'HOLD…' : 'HOLD TO\nSEND SOS',
+        if (holdProgress > 0.02) {
+          // Screen 2 — the readout is the real Stopwatch-derived fraction,
+          // not an animation value.
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'KEEP HOLDING',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.2,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                '${(holdProgress * 100).round()}%',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 34,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          );
+        }
+        return const Text(
+          'HOLD TO\nSEND SOS',
           textAlign: TextAlign.center,
-          style: const TextStyle(
+          style: TextStyle(
             color: Colors.white,
             fontSize: 18,
             fontWeight: FontWeight.w600,
@@ -565,61 +641,6 @@ class _ButtonLabel extends StatelessWidget {
           ),
         );
     }
-  }
-}
-
-/// Cycles through short atmospheric phrases while genuinely waiting on the
-/// backend — a `Timer` + `AnimatedSwitcher` crossfade, not a restart of the
-/// button's own animation tree just to swap text. Purely atmospheric: there
-/// is no partial-progress data from a single SOS submission, so this never
-/// implies a real step count. Lives inside the button (not the surrounding
-/// screen) since the sending-phase content renders in place of the old
-/// spinner, at the button's own size.
-class _CyclingSubtext extends StatefulWidget {
-  final List<String> phrases;
-
-  const _CyclingSubtext({required this.phrases});
-
-  @override
-  State<_CyclingSubtext> createState() => _CyclingSubtextState();
-}
-
-class _CyclingSubtextState extends State<_CyclingSubtext> {
-  int _index = 0;
-  Timer? _timer;
-
-  @override
-  void initState() {
-    super.initState();
-    _timer = Timer.periodic(const Duration(milliseconds: 1350), (_) {
-      if (!mounted) {
-        return;
-      }
-      setState(() => _index = (_index + 1) % widget.phrases.length);
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 300),
-      child: Text(
-        widget.phrases[_index],
-        key: ValueKey(_index),
-        textAlign: TextAlign.center,
-        style: const TextStyle(
-          color: Colors.white70,
-          fontSize: 12,
-          height: 1.3,
-        ),
-      ),
-    );
   }
 }
 

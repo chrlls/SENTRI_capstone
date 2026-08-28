@@ -3,23 +3,31 @@ import 'package:provider/provider.dart';
 
 import 'providers/auth_provider.dart';
 import 'screens/login_screen.dart';
+import 'services/incident_status_store.dart';
 import 'theme/sentri_colors.dart';
 
 void main() {
   runApp(const SentriApp());
 }
 
-/// docs/decisions/28-flutter-manual-sos-mvp.md: three screens only
-/// (register, login, SOS), gated purely by in-memory AuthProvider state —
-/// login/register push straight to the next screen on success, so there
-/// is no separate route-guard layer to build for a flow this small.
+/// docs/decisions/28-flutter-manual-sos-mvp.md: register/login/SOS, gated
+/// purely by in-memory AuthProvider state — login/register push straight
+/// to the next screen on success, so there is no separate route-guard
+/// layer to build for a flow this small.
+///
+/// [IncidentStatusStore] is provided here, above all screens, on purpose:
+/// Decision 31 §1 requires the incident-status poller to outlive screen
+/// navigation and never be gated on the current screen.
 class SentriApp extends StatelessWidget {
   const SentriApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => AuthProvider(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(create: (_) => IncidentStatusStore()),
+      ],
       child: MaterialApp(
         title: 'SENTRI',
         debugShowCheckedModeBanner: false,
@@ -35,16 +43,17 @@ class SentriApp extends StatelessWidget {
           useMaterial3: true,
           brightness: Brightness.light,
           scaffoldBackgroundColor: SentriColors.background,
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: SentriColors.primaryRed,
-            brightness: Brightness.light,
-          ).copyWith(
-            primary: SentriColors.primaryRed,
-            onPrimary: Colors.white,
-            surface: SentriColors.background,
-            onSurface: SentriColors.textPrimary,
-            error: SentriColors.caution,
-          ),
+          colorScheme:
+              ColorScheme.fromSeed(
+                seedColor: SentriColors.primaryRed,
+                brightness: Brightness.light,
+              ).copyWith(
+                primary: SentriColors.primaryRed,
+                onPrimary: Colors.white,
+                surface: SentriColors.background,
+                onSurface: SentriColors.textPrimary,
+                error: SentriColors.caution,
+              ),
           appBarTheme: const AppBarTheme(
             backgroundColor: SentriColors.background,
             foregroundColor: SentriColors.textPrimary,
@@ -57,7 +66,9 @@ class SentriApp extends StatelessWidget {
             ),
           ),
           textButtonTheme: TextButtonThemeData(
-            style: TextButton.styleFrom(foregroundColor: SentriColors.primaryRed),
+            style: TextButton.styleFrom(
+              foregroundColor: SentriColors.primaryRed,
+            ),
           ),
         ),
         home: const LoginScreen(),

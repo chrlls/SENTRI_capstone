@@ -27,9 +27,10 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
-/// Deliberately narrow — exactly the three calls this MVP needs
-/// (docs/decisions/28), not a generic "everything" API service. Matches
-/// API_CONTRACTS.md's request/response field names exactly.
+/// Deliberately narrow — exactly the calls this MVP needs
+/// (docs/decisions/28, plus incident-status polling per decision 31), not
+/// a generic "everything" API service. Matches API_CONTRACTS.md's
+/// request/response field names exactly.
 class SentriApiClient {
   final String baseUrl;
   final http.Client _client;
@@ -73,7 +74,10 @@ class SentriApiClient {
 
   /// Returns the bearer token on success. Does not store it — that's
   /// AuthProvider's job, in memory only for this MVP.
-  Future<String> login({required String email, required String password}) async {
+  Future<String> login({
+    required String email,
+    required String password,
+  }) async {
     final response = await _client.post(
       Uri.parse('$baseUrl/api/auth/login'),
       headers: _jsonHeaders(),
@@ -124,25 +128,26 @@ class SentriApiClient {
     required double longitude,
     required String audioFilePath,
   }) async {
-    final request = http.MultipartRequest(
-      'POST',
-      Uri.parse('$baseUrl/api/incidents/ai-assisted-sos'),
-    )
-      ..headers['Accept'] = 'application/json'
-      ..headers['Authorization'] = 'Bearer $token'
-      ..fields['latitude'] = latitude.toString()
-      ..fields['longitude'] = longitude.toString()
-      ..files.add(
-        // Explicit content type: the server validates the actual file
-        // bytes (PHP fileinfo), not this header, but setting it
-        // correctly still avoids relying on MultipartFile.fromPath's
-        // own extension-based guess.
-        await http.MultipartFile.fromPath(
-          'audio',
-          audioFilePath,
-          contentType: MediaType('audio', 'wav'),
-        ),
-      );
+    final request =
+        http.MultipartRequest(
+            'POST',
+            Uri.parse('$baseUrl/api/incidents/ai-assisted-sos'),
+          )
+          ..headers['Accept'] = 'application/json'
+          ..headers['Authorization'] = 'Bearer $token'
+          ..fields['latitude'] = latitude.toString()
+          ..fields['longitude'] = longitude.toString()
+          ..files.add(
+            // Explicit content type: the server validates the actual file
+            // bytes (PHP fileinfo), not this header, but setting it
+            // correctly still avoids relying on MultipartFile.fromPath's
+            // own extension-based guess.
+            await http.MultipartFile.fromPath(
+              'audio',
+              audioFilePath,
+              contentType: MediaType('audio', 'wav'),
+            ),
+          );
 
     final streamedResponse = await _client.send(request);
     final response = await http.Response.fromStream(streamedResponse);
@@ -150,6 +155,29 @@ class SentriApiClient {
     final data = _decode(response.body);
 
     if (response.statusCode != 201) {
+      throw _errorFrom(response.statusCode, data);
+    }
+
+    return data;
+  }
+
+  /// Per API_CONTRACTS.md `GET /api/incidents/{incident}` — single incident
+  /// detail, Decision-21 scoped. A `404` is returned both for a
+  /// nonexistent id and for one the caller isn't allowed to see (a `403`
+  /// would confirm an SOS exists). Used by [IncidentStatusStore]'s polling
+  /// loop; the only field it currently reads is `status`.
+  Future<Map<String, dynamic>> getIncident({
+    required String token,
+    required String incidentId,
+  }) async {
+    final response = await _client.get(
+      Uri.parse('$baseUrl/api/incidents/$incidentId'),
+      headers: {..._jsonHeaders(), 'Authorization': 'Bearer $token'},
+    );
+
+    final data = _decode(response.body);
+
+    if (response.statusCode != 200) {
       throw _errorFrom(response.statusCode, data);
     }
 
@@ -174,7 +202,8 @@ class SentriApiClient {
   }
 
   ApiException _errorFrom(int statusCode, Map<String, dynamic> data) {
-    final message = data['message'] as String? ?? 'Something went wrong. Please try again.';
+    final message =
+        data['message'] as String? ?? 'Something went wrong. Please try again.';
     final errors = data['errors'] as Map<String, dynamic>?;
     return ApiException(statusCode, message, errors);
   }
