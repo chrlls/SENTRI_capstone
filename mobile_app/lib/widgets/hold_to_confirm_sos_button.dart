@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:math' show cos, pi;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
 
 import '../theme/sentri_colors.dart';
 import 'sos_particle_field.dart';
@@ -15,14 +17,22 @@ const _diameter = 220.0;
 const _discRadius = _diameter / 2;
 
 /// Holding for [holdDuration] fires [onHoldComplete]; releasing early
-/// reverses the animation and fires nothing. Progress during the hold is
-/// communicated entirely by [SosParticleFieldPainter]'s emission-based
-/// particle field. The button's size and position never change across
-/// phases — only the color (on confirmation) and the center content
-/// change. (An earlier version of this widget shrank the disc into a small
-/// pulsing dot during the sending phase; that concept was a misreading of
-/// the actual request and has been fully removed — the button stays fixed
-/// size/position always.)
+/// reverses the animation and fires nothing.
+///
+/// **One particle behaviour across every phase** (see
+/// [SosParticleFieldPainter]): particles are born at the disc edge, drift
+/// out, fade, and loop on a single continuous [_emissionController] clock.
+/// The only thing that changes by phase is the emission *intensity* —
+/// `holdProgress²` while holding (so the field fills as a progress read),
+/// then pinned at `1.0` through sending/sent. Because the clock never
+/// stops and intensity is already full when the hold completes, the
+/// hold→sending hand-off has no seam.
+///
+/// The disc itself never changes size or position in any phase — only its
+/// color (on confirmation) and center content. The halo rings do a faster
+/// "transmit" swell while sending/sent (a more urgent version of the idle
+/// "armed" breath). (An earlier version shrank the disc into a small
+/// pulsing dot during sending; that was a misread and is fully gone.)
 class HoldToConfirmSosButton extends StatefulWidget {
   final SosButtonPhase phase;
   final VoidCallback onHoldComplete;
@@ -49,38 +59,147 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
     with TickerProviderStateMixin {
   late final AnimationController _holdController;
   late final AnimationController _sentBurstController;
+
+  /// Quick disc "press" acknowledgement (scale to 0.97) the instant the
+  /// finger lands — the particle field takes ~750ms to visibly ramp, so
+  /// without this the first beat of a hold has no response at all. Held
+  /// down for the whole gesture, released on completion or early release.
+  late final AnimationController _pressController;
+
+  /// Slow ambient breathing on the halo rings only (never the disc or its
+  /// label) while the button sits idle and untouched — a state cue that
+  /// the control is armed, not a static graphic. Stopped under reduced
+  /// motion (see [didChangeDependencies]).
+  late final AnimationController _idleController;
+
+  /// The single looping clock every particle rides, plus the halo
+  /// transmit-pulse. Started on pointer-down, kept running through
+  /// sending/sent, stopped on idle or an early release. Off under reduced
+  /// motion (see [didChangeDependencies]).
+  late final AnimationController _emissionController;
+
   late final List<SosParticle> _particles;
+
+  /// Hold-progress fractions at which a light detent tick fires, so the
+  /// 2.5s hold has an escalating physical ramp toward the commit. Reset to
+  /// -1 on each new press ([_onPointerDown]) so a second hold re-ticks.
+  static const List<double> _hapticMilestones = [0.3, 0.6, 0.85];
+  int _lastHapticMilestone = -1;
 
   @override
   void initState() {
     super.initState();
 
     _holdController = AnimationController(vsync: this, duration: widget.holdDuration)
-      ..addStatusListener(_handleHoldStatusChanged);
+      ..addStatusListener(_handleHoldStatusChanged)
+      ..addListener(_fireHoldMilestoneHaptics);
 
     _sentBurstController = AnimationController(
       vsync: this,
       duration: HoldToConfirmSosButton.sentAnimationDuration,
     );
 
+    _pressController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 130),
+      reverseDuration: const Duration(milliseconds: 160),
+    );
+
+    _idleController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2800),
+    );
+
+    _emissionController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    );
+
     _particles = generateSosParticles();
   }
 
+  /// Continuous motion (idle breath, particle emission clock) runs only
+  /// when the OS "remove animations" setting is off — checked here rather
+  /// than in `initState` because `MediaQuery` isn't available yet there,
+  /// and re-checked if the setting is toggled while this screen is open.
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final reduceMotion = MediaQuery.of(context).disableAnimations;
+    if (reduceMotion) {
+      _idleController.stop();
+      _emissionController.stop();
+    } else {
+      if (!_idleController.isAnimating) {
+        _idleController.repeat(reverse: true);
+      }
+      final emitting = _isTransmitting || _holdController.value > 0;
+      if (emitting && !_emissionController.isAnimating) {
+        _emissionController.repeat();
+      }
+    }
+  }
+
+  bool get _isTransmitting =>
+      widget.phase == SosButtonPhase.sending || widget.phase == SosButtonPhase.sent;
+
   void _handleHoldStatusChanged(AnimationStatus status) {
     if (status == AnimationStatus.completed) {
+      HapticFeedback.heavyImpact();
+      _pressController.reverse();
       widget.onHoldComplete();
+    } else if (status == AnimationStatus.dismissed) {
+      // Early release has fully reversed — the field has emptied itself
+      // (emissionIntensity rode holdProgress back to 0), so park the clock.
+      _emissionController.stop();
+      _emissionController.value = 0;
     }
+  }
+
+  /// Fires a detent tick when the hold crosses the next [_hapticMilestones]
+  /// threshold. Gated to `forward` so reversing past a threshold on an
+  /// early release stays silent.
+  void _fireHoldMilestoneHaptics() {
+    if (_holdController.status != AnimationStatus.forward) {
+      return;
+    }
+    var reached = -1;
+    for (var i = 0; i < _hapticMilestones.length; i++) {
+      if (_holdController.value >= _hapticMilestones[i]) {
+        reached = i;
+      }
+    }
+    if (reached > _lastHapticMilestone) {
+      HapticFeedback.selectionClick();
+    }
+    _lastHapticMilestone = reached;
   }
 
   @override
   void didUpdateWidget(HoldToConfirmSosButton oldWidget) {
     super.didUpdateWidget(oldWidget);
+
+    // The clock is normally already running (started on pointer-down and
+    // kept alive through the hold). This is just a safety net for a
+    // `sending` phase that somehow arrives without a preceding hold.
+    if (widget.phase == SosButtonPhase.sending &&
+        oldWidget.phase != SosButtonPhase.sending &&
+        !_emissionController.isAnimating &&
+        !MediaQuery.of(context).disableAnimations) {
+      _emissionController.repeat();
+    }
+
     if (widget.phase == SosButtonPhase.sent && oldWidget.phase != SosButtonPhase.sent) {
       _sentBurstController.forward(from: 0);
+      // Emission clock keeps running from `sending` into `sent` — the
+      // stream and halo pulse just crossfade to green via `confirmProgress`.
     }
+
     if (widget.phase == SosButtonPhase.idle && oldWidget.phase != SosButtonPhase.idle) {
       _holdController.value = 0;
       _sentBurstController.value = 0;
+      _emissionController.stop();
+      _emissionController.value = 0;
     }
   }
 
@@ -88,6 +207,9 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
   void dispose() {
     _holdController.dispose();
     _sentBurstController.dispose();
+    _pressController.dispose();
+    _idleController.dispose();
+    _emissionController.dispose();
     super.dispose();
   }
 
@@ -95,13 +217,26 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
     if (widget.phase != SosButtonPhase.idle) {
       return;
     }
+    _lastHapticMilestone = -1;
+    HapticFeedback.selectionClick();
+    _pressController.forward();
     _holdController.forward();
+    // The particle emission clock runs for the whole gesture, not just
+    // sending — so the hold field is already a live stream that simply
+    // keeps flowing when the SOS fires.
+    if (!MediaQuery.of(context).disableAnimations) {
+      _emissionController.repeat();
+    }
   }
 
   void _onPointerUp(PointerEvent _) {
     if (_holdController.status == AnimationStatus.forward) {
+      // Released before completion — a soft "nothing sent" tap, distinct
+      // from the heavy impact a real send fires.
+      HapticFeedback.lightImpact();
       _holdController.reverse();
     }
+    _pressController.reverse();
   }
 
   @override
@@ -122,30 +257,66 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
         width: _diameter + 140,
         height: _diameter + 140,
         child: AnimatedBuilder(
-          animation: Listenable.merge([_holdController, _sentBurstController]),
+          animation: Listenable.merge([
+            _holdController,
+            _sentBurstController,
+            _pressController,
+            _idleController,
+            _emissionController,
+          ]),
           builder: (context, _) {
             final phase = widget.phase;
             final sentBurst = _sentBurstController.value;
             final confirmProgress =
                 phase == SosButtonPhase.sent ? Curves.easeInOut.transform((sentBurst / 0.6).clamp(0.0, 1.0)) : 0.0;
 
-            return CustomPaint(
-              painter: _SosButtonPainter(
-                holdProgress: _holdController.value,
-                confirmProgress: confirmProgress,
-                phase: phase,
-                particles: _particles,
-                reduceMotion: reduceMotion,
-              ),
-              child: Center(
-                child: SizedBox(
-                  width: _diameter,
-                  height: _diameter,
-                  child: Center(
-                    child: _ButtonLabel(
-                      phase: phase,
-                      holdProgress: _holdController.value,
-                      sentBurst: sentBurst,
+            // Whole button (disc, halo, label) dips to 0.97 while pressed —
+            // instant touch acknowledgement ahead of the particle ramp.
+            final pressScale =
+                reduceMotion ? 1.0 : 1.0 - 0.03 * Curves.easeOut.transform(_pressController.value);
+            final idlePulse = reduceMotion ? 0.0 : _idleController.value;
+
+            // One emission model for hold + sending + sent. Intensity is
+            // the only phase-dependent input: holdProgress² while holding
+            // (an accelerating fill = the progress read), pinned at 1 once
+            // transmitting. The clock is frozen under reduced motion so
+            // particles hold static positions and just appear by intensity.
+            final hold = _holdController.value;
+            final emissionIntensity = _isTransmitting ? 1.0 : hold * hold;
+            final emissionClock = reduceMotion ? 0.0 : _emissionController.value;
+
+            // Halo transmit-pulse: only while sending/sent, only with
+            // motion on. A faster, slightly bigger version of the idle
+            // "armed" breath. `(1 - cos)/2` gives one clean swell per clock
+            // cycle.
+            final transmitting = _isTransmitting && !reduceMotion;
+            final transmitPulse =
+                transmitting ? (1 - cos(_emissionController.value * 2 * pi)) / 2 : 0.0;
+
+            return Transform.scale(
+              scale: pressScale,
+              child: CustomPaint(
+                painter: _SosButtonPainter(
+                  emissionClock: emissionClock,
+                  emissionIntensity: emissionIntensity,
+                  confirmProgress: confirmProgress,
+                  phase: phase,
+                  particles: _particles,
+                  reduceMotion: reduceMotion,
+                  idlePulse: idlePulse,
+                  transmitting: transmitting,
+                  transmitPulse: transmitPulse,
+                ),
+                child: Center(
+                  child: SizedBox(
+                    width: _diameter,
+                    height: _diameter,
+                    child: Center(
+                      child: _ButtonLabel(
+                        phase: phase,
+                        holdProgress: _holdController.value,
+                        sentBurst: sentBurst,
+                      ),
                     ),
                   ),
                 ),
@@ -282,37 +453,46 @@ class _CyclingSubtextState extends State<_CyclingSubtext> {
 }
 
 class _SosButtonPainter extends CustomPainter {
-  final double holdProgress;
+  final double emissionClock;
+  final double emissionIntensity;
   final double confirmProgress;
   final SosButtonPhase phase;
   final List<SosParticle> particles;
   final bool reduceMotion;
 
+  /// 0..1 breathing phase for the idle "armed" halo pulse. Only has any
+  /// effect while the button is genuinely at rest (see [_atRest]); pinned
+  /// to 0 by the caller under reduced motion.
+  final double idlePulse;
+
+  /// True while sending/sent with motion allowed — the halo rings do a
+  /// faster "transmit" swell instead of the idle breath.
+  final bool transmitting;
+
+  /// 0..1 swell value for that transmit pulse (one clean hump per emission
+  /// clock cycle). 0 outside the transmit state.
+  final double transmitPulse;
+
   _SosButtonPainter({
-    required this.holdProgress,
+    required this.emissionClock,
+    required this.emissionIntensity,
     required this.confirmProgress,
     required this.phase,
     required this.particles,
     required this.reduceMotion,
+    required this.idlePulse,
+    required this.transmitting,
+    required this.transmitPulse,
   });
+
+  bool get _atRest => emissionIntensity == 0 && confirmProgress <= 0;
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
     const radius = _discRadius;
 
-    // Soft halo behind the disc, always visible — the same layered-glow
-    // treatment as before, crossfading to green on confirmation (same
-    // shortest-arc hue path as the disc/particles, so nothing red-toned is
-    // left behind once the disc has turned).
-    final glowOuter = confirmProgress <= 0
-        ? SentriColors.glowOuter
-        : lerpWarmToSafeColor(SentriColors.glowOuter, SentriColors.success.withValues(alpha: 0.08), confirmProgress);
-    final glowInner = confirmProgress <= 0
-        ? SentriColors.glowInner
-        : lerpWarmToSafeColor(SentriColors.glowInner, SentriColors.success.withValues(alpha: 0.16), confirmProgress);
-    canvas.drawCircle(center, radius + 50, Paint()..color = glowOuter);
-    canvas.drawCircle(center, radius + 25, Paint()..color = glowInner);
+    _paintHalo(canvas, center, radius);
 
     // The disc is a precise, undistorted circle in every phase — shape,
     // size, and position never change, only color. `lerpWarmToSafeColor`
@@ -328,18 +508,64 @@ class _SosButtonPainter extends CustomPainter {
 
     SosParticleFieldPainter(
       particles: particles,
-      holdProgress: holdProgress,
+      emissionClock: emissionClock,
+      emissionIntensity: emissionIntensity,
       confirmProgress: confirmProgress,
       discRadius: radius,
       reduceMotion: reduceMotion,
     ).paint(canvas, size);
   }
 
+  /// The two soft filled halo rings behind the disc.
+  ///
+  /// - **idle / hold**: alpha swells ±6% on the slow `idlePulse` "armed"
+  ///   breath while genuinely at rest; flat otherwise / under reduced
+  ///   motion. No size change.
+  /// - **transmit** (sending/sent): the same rings, but each frame's
+  ///   `transmitPulse` grows the radius a few px and lifts the alpha — a
+  ///   faster, slightly bigger version of the same breath.
+  ///
+  /// Both crossfade to green with `confirmProgress` (same shortest-arc hue
+  /// path as the disc/particles).
+  void _paintHalo(Canvas canvas, Offset center, double radius) {
+    final double radiusBoostOuter;
+    final double radiusBoostInner;
+    final double alphaMult;
+
+    if (transmitting) {
+      final swell = Curves.easeInOut.transform(transmitPulse);
+      radiusBoostOuter = 4.0 * swell;
+      radiusBoostInner = 3.0 * swell;
+      alphaMult = 0.85 + 0.30 * swell;
+    } else {
+      radiusBoostOuter = 0;
+      radiusBoostInner = 0;
+      alphaMult =
+          (_atRest && !reduceMotion) ? 0.94 + 0.06 * Curves.easeInOut.transform(idlePulse) : 1.0;
+    }
+
+    final glowOuter = confirmProgress <= 0
+        ? _scaleAlpha(SentriColors.glowOuter, alphaMult)
+        : lerpWarmToSafeColor(SentriColors.glowOuter, SentriColors.success.withValues(alpha: 0.08), confirmProgress);
+    final glowInner = confirmProgress <= 0
+        ? _scaleAlpha(SentriColors.glowInner, alphaMult)
+        : lerpWarmToSafeColor(SentriColors.glowInner, SentriColors.success.withValues(alpha: 0.16), confirmProgress);
+    canvas.drawCircle(center, radius + 50 + radiusBoostOuter, Paint()..color = glowOuter);
+    canvas.drawCircle(center, radius + 25 + radiusBoostInner, Paint()..color = glowInner);
+  }
+
   @override
   bool shouldRepaint(covariant _SosButtonPainter oldDelegate) {
-    return oldDelegate.holdProgress != holdProgress ||
+    return oldDelegate.emissionClock != emissionClock ||
+        oldDelegate.emissionIntensity != emissionIntensity ||
         oldDelegate.confirmProgress != confirmProgress ||
         oldDelegate.phase != phase ||
-        oldDelegate.reduceMotion != reduceMotion;
+        oldDelegate.reduceMotion != reduceMotion ||
+        oldDelegate.idlePulse != idlePulse ||
+        oldDelegate.transmitting != transmitting ||
+        oldDelegate.transmitPulse != transmitPulse;
   }
 }
+
+Color _scaleAlpha(Color color, double factor) =>
+    color.withValues(alpha: (color.a * factor).clamp(0.0, 1.0));
