@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' show cos, pi;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart' show Ticker;
 import 'package:flutter/services.dart' show HapticFeedback;
 
 import '../theme/sentri_colors.dart';
@@ -16,8 +17,13 @@ enum SosButtonPhase { idle, sending, sent }
 const _diameter = 220.0;
 const _discRadius = _diameter / 2;
 
-/// Holding for [holdDuration] fires [onHoldComplete]; releasing early
-/// reverses the animation and fires nothing.
+/// Holding for the real elapsed [holdDuration] fires [onHoldComplete];
+/// releasing early cancels and fires nothing. The hold is gated by a
+/// `Stopwatch` + `Ticker` ([_HoldToConfirmSosButtonState._holdWatch] /
+/// `_holdProgress`), never an `AnimationController` — an `AnimationController`
+/// completes instantly under the OS "remove animations" setting, which
+/// would let a tap fire an SOS with no hold at all (Decision 31 Open
+/// Item A / mobile UI audit item 1.7).
 ///
 /// **One particle behaviour across every phase** (see
 /// [SosParticleFieldPainter]): particles are born at the disc edge, drift
@@ -57,7 +63,26 @@ class HoldToConfirmSosButton extends StatefulWidget {
 
 class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
     with TickerProviderStateMixin {
-  late final AnimationController _holdController;
+  /// The hold gate's single source of truth: real elapsed wall-clock time,
+  /// immune to animation scale. Decision 31 Open Item A.
+  final Stopwatch _holdWatch = Stopwatch();
+
+  /// Schedules a per-frame rebuild while a hold is in progress so [build]
+  /// re-reads [_holdProgress], and is where completion is detected. A
+  /// `Ticker` keeps firing regardless of the OS "remove animations"
+  /// setting — only `AnimationController` durations are affected by it.
+  late final Ticker _holdTicker;
+
+  /// 0..1 fraction of [HoldToConfirmSosButton.holdDuration] actually held,
+  /// derived from [_holdWatch]. This — never an animation value — is what
+  /// the particle fill and any percentage readout read from.
+  double _holdProgress = 0;
+
+  /// True once [HoldToConfirmSosButton.onHoldComplete] has fired for the
+  /// current press, so a stray already-queued tick can't fire it twice.
+  /// Cleared on the next pointer-down.
+  bool _holdCompleted = false;
+
   late final AnimationController _sentBurstController;
 
   /// Quick disc "press" acknowledgement (scale to 0.97) the instant the
@@ -78,6 +103,16 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
   /// motion (see [didChangeDependencies]).
   late final AnimationController _emissionController;
 
+  /// Purely decorative: on an early release, ramps the particle fill from
+  /// its value at the moment of cancellation back down to empty over ~1s
+  /// instead of snapping. Has **no** bearing on the hold gate — [_holdWatch]
+  /// / [_holdProgress] / [onHoldComplete] never read it.
+  late final AnimationController _cancelDecayController;
+
+  /// The `emissionIntensity` captured when the current fade-back started;
+  /// the decay interpolates this → 0. Zero when no fade-back is running.
+  double _cancelFillFrom = 0;
+
   late final List<SosParticle> _particles;
 
   /// Hold-progress fractions at which a light detent tick fires, so the
@@ -90,9 +125,7 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
   void initState() {
     super.initState();
 
-    _holdController = AnimationController(vsync: this, duration: widget.holdDuration)
-      ..addStatusListener(_handleHoldStatusChanged)
-      ..addListener(_fireHoldMilestoneHaptics);
+    _holdTicker = createTicker(_onHoldTick);
 
     _sentBurstController = AnimationController(
       vsync: this,
@@ -115,6 +148,11 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
       duration: const Duration(milliseconds: 1400),
     );
 
+    _cancelDecayController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    )..addStatusListener(_handleCancelDecayStatus);
+
     _particles = generateSosParticles();
   }
 
@@ -129,11 +167,19 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
     if (reduceMotion) {
       _idleController.stop();
       _emissionController.stop();
+      // Don't leave a decorative fade-back running once the OS asks for
+      // no animation — jump it to empty.
+      if (_cancelDecayController.isAnimating) {
+        _cancelDecayController.stop();
+        _cancelDecayController.value = 0;
+        _cancelFillFrom = 0;
+        _emissionController.value = 0;
+      }
     } else {
       if (!_idleController.isAnimating) {
         _idleController.repeat(reverse: true);
       }
-      final emitting = _isTransmitting || _holdController.value > 0;
+      final emitting = _isTransmitting || _holdWatch.isRunning;
       if (emitting && !_emissionController.isAnimating) {
         _emissionController.repeat();
       }
@@ -141,31 +187,65 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
   }
 
   bool get _isTransmitting =>
-      widget.phase == SosButtonPhase.sending || widget.phase == SosButtonPhase.sent;
+      widget.phase == SosButtonPhase.sending ||
+      widget.phase == SosButtonPhase.sent;
 
-  void _handleHoldStatusChanged(AnimationStatus status) {
-    if (status == AnimationStatus.completed) {
-      HapticFeedback.heavyImpact();
-      _pressController.reverse();
-      widget.onHoldComplete();
-    } else if (status == AnimationStatus.dismissed) {
-      // Early release has fully reversed — the field has emptied itself
-      // (emissionIntensity rode holdProgress back to 0), so park the clock.
-      _emissionController.stop();
-      _emissionController.value = 0;
-    }
-  }
-
-  /// Fires a detent tick when the hold crosses the next [_hapticMilestones]
-  /// threshold. Gated to `forward` so reversing past a threshold on an
-  /// early release stays silent.
-  void _fireHoldMilestoneHaptics() {
-    if (_holdController.status != AnimationStatus.forward) {
+  /// Runs every frame while [_holdWatch] is running. Reads real elapsed
+  /// time (not an animation value), fires the escalating detent haptics,
+  /// and completes the gate once the full [HoldToConfirmSosButton.holdDuration]
+  /// has genuinely elapsed.
+  void _onHoldTick(Duration _) {
+    if (!_holdWatch.isRunning) {
       return;
     }
+    final progress =
+        (_holdWatch.elapsed.inMicroseconds / widget.holdDuration.inMicroseconds)
+            .clamp(0.0, 1.0);
+
+    _fireHoldMilestoneHaptics(progress);
+
+    if (progress >= 1.0) {
+      _completeHold();
+      return;
+    }
+    setState(() => _holdProgress = progress);
+  }
+
+  /// When the decorative fade-back finishes, park the emission clock and
+  /// clear the captured value. Skipped if a fresh hold started meanwhile
+  /// (that hold owns the field now).
+  void _handleCancelDecayStatus(AnimationStatus status) {
+    if (status != AnimationStatus.completed || _holdWatch.isRunning) {
+      return;
+    }
+    _emissionController.stop();
+    _emissionController.value = 0;
+    setState(() => _cancelFillFrom = 0);
+  }
+
+  void _completeHold() {
+    if (_holdCompleted) {
+      return;
+    }
+    _holdCompleted = true;
+    _holdWatch
+      ..stop()
+      ..reset();
+    _holdTicker.stop();
+    HapticFeedback.heavyImpact();
+    _pressController.reverse();
+    setState(() => _holdProgress = 1.0);
+    widget.onHoldComplete();
+  }
+
+  /// Fires a detent tick when the real hold crosses the next
+  /// [_hapticMilestones] threshold. [_lastHapticMilestone] is a per-press
+  /// high-water mark, so releasing and re-holding re-ticks and a stalled
+  /// hold doesn't repeat.
+  void _fireHoldMilestoneHaptics(double progress) {
     var reached = -1;
     for (var i = 0; i < _hapticMilestones.length; i++) {
-      if (_holdController.value >= _hapticMilestones[i]) {
+      if (progress >= _hapticMilestones[i]) {
         reached = i;
       }
     }
@@ -189,38 +269,64 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
       _emissionController.repeat();
     }
 
-    if (widget.phase == SosButtonPhase.sent && oldWidget.phase != SosButtonPhase.sent) {
+    if (widget.phase == SosButtonPhase.sent &&
+        oldWidget.phase != SosButtonPhase.sent) {
       _sentBurstController.forward(from: 0);
       // Emission clock keeps running from `sending` into `sent` — the
       // stream and halo pulse just crossfade to green via `confirmProgress`.
     }
 
-    if (widget.phase == SosButtonPhase.idle && oldWidget.phase != SosButtonPhase.idle) {
-      _holdController.value = 0;
+    if (widget.phase == SosButtonPhase.idle &&
+        oldWidget.phase != SosButtonPhase.idle) {
+      _holdWatch
+        ..stop()
+        ..reset();
+      _holdTicker.stop();
+      _holdProgress = 0;
+      _holdCompleted = false;
       _sentBurstController.value = 0;
       _emissionController.stop();
       _emissionController.value = 0;
+      _cancelDecayController.stop();
+      _cancelDecayController.value = 0;
+      _cancelFillFrom = 0;
     }
   }
 
   @override
   void dispose() {
-    _holdController.dispose();
+    _holdTicker.dispose();
     _sentBurstController.dispose();
     _pressController.dispose();
     _idleController.dispose();
     _emissionController.dispose();
+    _cancelDecayController.dispose();
     super.dispose();
   }
 
   void _onPointerDown(PointerDownEvent _) {
-    if (widget.phase != SosButtonPhase.idle) {
+    // Ignore a second finger while a hold is already running, and any
+    // touch once the gesture is out of the idle phase.
+    if (widget.phase != SosButtonPhase.idle || _holdWatch.isRunning) {
       return;
     }
     _lastHapticMilestone = -1;
+    _holdCompleted = false;
+    // Abandon any decorative fade-back still running from a previous
+    // cancel — this new hold owns the field now.
+    _cancelDecayController.stop();
+    _cancelDecayController.value = 0;
+    _cancelFillFrom = 0;
     HapticFeedback.selectionClick();
     _pressController.forward();
-    _holdController.forward();
+    // Start the real elapsed-time gate — a Stopwatch measured against
+    // wall-clock time, ticked per frame. Neither the Stopwatch nor the
+    // Ticker is affected by the OS "remove animations" setting, so the
+    // full hold duration is always required (Decision 31 Open Item A).
+    _holdWatch
+      ..reset()
+      ..start();
+    _holdTicker.start();
     // The particle emission clock runs for the whole gesture, not just
     // sending — so the hold field is already a live stream that simply
     // keeps flowing when the SOS fires.
@@ -230,11 +336,34 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
   }
 
   void _onPointerUp(PointerEvent _) {
-    if (_holdController.status == AnimationStatus.forward) {
-      // Released before completion — a soft "nothing sent" tap, distinct
-      // from the heavy impact a real send fires.
+    if (_holdWatch.isRunning) {
+      // Released before the full duration elapsed — cancel. A soft
+      // "nothing sent" tap, distinct from the heavy impact a real send
+      // fires. If the hold already completed, [_holdWatch] is stopped and
+      // this branch is skipped — the send has fired and is not undone.
       HapticFeedback.lightImpact();
-      _holdController.reverse();
+      final fillAtCancel = _holdProgress * _holdProgress;
+      _holdWatch
+        ..stop()
+        ..reset();
+      _holdTicker.stop();
+      _lastHapticMilestone = -1;
+
+      if (MediaQuery.of(context).disableAnimations) {
+        // OS asked for no animation — clear the fill immediately.
+        _emissionController.stop();
+        _emissionController.value = 0;
+        _cancelFillFrom = 0;
+      } else {
+        // Decorative only: let the particle fill drift and fade out over
+        // ~1s. The hold is already cancelled above; this controller has no
+        // influence on the gate. The emission clock keeps looping so the
+        // particles keep moving while they fade — it is parked in
+        // [_handleCancelDecayStatus] once the decay finishes.
+        _cancelFillFrom = fillAtCancel;
+        _cancelDecayController.forward(from: 0);
+      }
+      setState(() => _holdProgress = 0);
     }
     _pressController.reverse();
   }
@@ -257,41 +386,64 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
         width: _diameter + 140,
         height: _diameter + 140,
         child: AnimatedBuilder(
+          // Hold progress no longer lives in an animation — [_onHoldTick]
+          // calls setState each frame while a hold is in progress.
           animation: Listenable.merge([
-            _holdController,
             _sentBurstController,
             _pressController,
             _idleController,
             _emissionController,
+            _cancelDecayController,
           ]),
           builder: (context, _) {
             final phase = widget.phase;
             final sentBurst = _sentBurstController.value;
-            final confirmProgress =
-                phase == SosButtonPhase.sent ? Curves.easeInOut.transform((sentBurst / 0.6).clamp(0.0, 1.0)) : 0.0;
+            final confirmProgress = phase == SosButtonPhase.sent
+                ? Curves.easeInOut.transform((sentBurst / 0.6).clamp(0.0, 1.0))
+                : 0.0;
 
             // Whole button (disc, halo, label) dips to 0.97 while pressed —
             // instant touch acknowledgement ahead of the particle ramp.
-            final pressScale =
-                reduceMotion ? 1.0 : 1.0 - 0.03 * Curves.easeOut.transform(_pressController.value);
+            final pressScale = reduceMotion
+                ? 1.0
+                : 1.0 - 0.03 * Curves.easeOut.transform(_pressController.value);
             final idlePulse = reduceMotion ? 0.0 : _idleController.value;
 
             // One emission model for hold + sending + sent. Intensity is
-            // the only phase-dependent input: holdProgress² while holding
-            // (an accelerating fill = the progress read), pinned at 1 once
-            // transmitting. The clock is frozen under reduced motion so
-            // particles hold static positions and just appear by intensity.
-            final hold = _holdController.value;
-            final emissionIntensity = _isTransmitting ? 1.0 : hold * hold;
-            final emissionClock = reduceMotion ? 0.0 : _emissionController.value;
+            // the only phase-dependent input: `_holdProgress²` (the real
+            // Stopwatch-derived hold fraction) while holding — an
+            // accelerating fill that IS the progress read — pinned at 1
+            // once transmitting. The clock is frozen under reduced motion
+            // so particles hold static positions and just appear by
+            // intensity.
+            final holdFill = _isTransmitting
+                ? 1.0
+                : _holdProgress * _holdProgress;
+            // Decorative fade-back after an early release: `_cancelFillFrom`
+            // eases to 0 as `_cancelDecayController` runs. Purely visual —
+            // it never feeds the gate. `max` so a fresh hold overtakes it.
+            final decayFill = reduceMotion
+                ? 0.0
+                : _cancelFillFrom *
+                      (1.0 -
+                          Curves.easeOut.transform(
+                            _cancelDecayController.value,
+                          ));
+            final emissionIntensity = holdFill > decayFill
+                ? holdFill
+                : decayFill;
+            final emissionClock = reduceMotion
+                ? 0.0
+                : _emissionController.value;
 
             // Halo transmit-pulse: only while sending/sent, only with
             // motion on. A faster, slightly bigger version of the idle
             // "armed" breath. `(1 - cos)/2` gives one clean swell per clock
             // cycle.
             final transmitting = _isTransmitting && !reduceMotion;
-            final transmitPulse =
-                transmitting ? (1 - cos(_emissionController.value * 2 * pi)) / 2 : 0.0;
+            final transmitPulse = transmitting
+                ? (1 - cos(_emissionController.value * 2 * pi)) / 2
+                : 0.0;
 
             return Transform.scale(
               scale: pressScale,
@@ -314,7 +466,7 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
                     child: Center(
                       child: _ButtonLabel(
                         phase: phase,
-                        holdProgress: _holdController.value,
+                        holdProgress: _holdProgress,
                         sentBurst: sentBurst,
                       ),
                     ),
@@ -355,11 +507,19 @@ class _ButtonLabel extends StatelessWidget {
               Text(
                 'Sending your\nalert...',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700, height: 1.25),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  height: 1.25,
+                ),
               ),
               SizedBox(height: 8),
               _CyclingSubtext(
-                phrases: ['Reaching emergency\nresponders', 'Confirming your\nlocation'],
+                phrases: [
+                  'Reaching emergency\nresponders',
+                  'Confirming your\nlocation',
+                ],
               ),
             ],
           ),
@@ -368,7 +528,9 @@ class _ButtonLabel extends StatelessWidget {
         // Enters 65ms into the 650ms success burst, over ~228ms — icon and
         // text arrive together as one unit, since the red->green color
         // change alone must not be the only signal that this succeeded.
-        final labelT = Curves.easeOutCubic.transform(((sentBurst - 0.1) / 0.35).clamp(0.0, 1.0));
+        final labelT = Curves.easeOutCubic.transform(
+          ((sentBurst - 0.1) / 0.35).clamp(0.0, 1.0),
+        );
         return Opacity(
           opacity: labelT,
           child: Transform.scale(
@@ -380,7 +542,12 @@ class _ButtonLabel extends StatelessWidget {
                 SizedBox(height: 6),
                 Text(
                   'SOS SENT',
-                  style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.2,
+                  ),
                 ),
               ],
             ),
@@ -446,7 +613,11 @@ class _CyclingSubtextState extends State<_CyclingSubtext> {
         widget.phrases[_index],
         key: ValueKey(_index),
         textAlign: TextAlign.center,
-        style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.3),
+        style: const TextStyle(
+          color: Colors.white70,
+          fontSize: 12,
+          height: 1.3,
+        ),
       ),
     );
   }
@@ -503,7 +674,11 @@ class _SosButtonPainter extends CustomPainter {
     // itself gives — both confirmed by rendering, not assumed.
     final discColor = confirmProgress <= 0
         ? SentriColors.primaryRed
-        : lerpWarmToSafeColor(SentriColors.primaryRed, SentriColors.success, confirmProgress);
+        : lerpWarmToSafeColor(
+            SentriColors.primaryRed,
+            SentriColors.success,
+            confirmProgress,
+          );
     canvas.drawCircle(center, radius, Paint()..color = discColor);
 
     SosParticleFieldPainter(
@@ -540,18 +715,35 @@ class _SosButtonPainter extends CustomPainter {
     } else {
       radiusBoostOuter = 0;
       radiusBoostInner = 0;
-      alphaMult =
-          (_atRest && !reduceMotion) ? 0.94 + 0.06 * Curves.easeInOut.transform(idlePulse) : 1.0;
+      alphaMult = (_atRest && !reduceMotion)
+          ? 0.94 + 0.06 * Curves.easeInOut.transform(idlePulse)
+          : 1.0;
     }
 
     final glowOuter = confirmProgress <= 0
         ? _scaleAlpha(SentriColors.glowOuter, alphaMult)
-        : lerpWarmToSafeColor(SentriColors.glowOuter, SentriColors.success.withValues(alpha: 0.08), confirmProgress);
+        : lerpWarmToSafeColor(
+            SentriColors.glowOuter,
+            SentriColors.success.withValues(alpha: 0.08),
+            confirmProgress,
+          );
     final glowInner = confirmProgress <= 0
         ? _scaleAlpha(SentriColors.glowInner, alphaMult)
-        : lerpWarmToSafeColor(SentriColors.glowInner, SentriColors.success.withValues(alpha: 0.16), confirmProgress);
-    canvas.drawCircle(center, radius + 50 + radiusBoostOuter, Paint()..color = glowOuter);
-    canvas.drawCircle(center, radius + 25 + radiusBoostInner, Paint()..color = glowInner);
+        : lerpWarmToSafeColor(
+            SentriColors.glowInner,
+            SentriColors.success.withValues(alpha: 0.16),
+            confirmProgress,
+          );
+    canvas.drawCircle(
+      center,
+      radius + 50 + radiusBoostOuter,
+      Paint()..color = glowOuter,
+    );
+    canvas.drawCircle(
+      center,
+      radius + 25 + radiusBoostInner,
+      Paint()..color = glowInner,
+    );
   }
 
   @override
