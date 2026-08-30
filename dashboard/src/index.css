@@ -44,6 +44,25 @@
     --radius-2xl: calc(var(--radius) * 1.8);
     --radius-3xl: calc(var(--radius) * 2.2);
     --radius-4xl: calc(var(--radius) * 2.6);
+
+    /*
+     * Shared elevation/shadow scale (dispatcher-console redesign) — tuned
+     * for this exact dark palette specifically: since the background is
+     * already very dark, a shadow's contribution comes almost entirely
+     * from opacity/blur, not color, so all four levels use pure black at
+     * increasing opacity/blur. Levels 2-4 add a 1px near-white hairline so
+     * an elevated surface still reads as "above" something else even where
+     * the shadow itself falls on other dark UI rather than open space.
+     * Level 1: resting, same-surface content (panel section cards).
+     * Level 2: floating chrome docked over the map (queue, filter strip,
+     * corner controls, marker tooltip, map layer toggle and zoom control).
+     * Level 3: the single largest floating surface (the detail panel).
+     * Level 4: modal-priority overlays above everything else (confirm dialogs).
+     */
+    --shadow-elevation-1: 0 1px 2px oklch(0 0 0 / 45%);
+    --shadow-elevation-2: 0 4px 12px oklch(0 0 0 / 50%), 0 0 0 1px oklch(1 0 0 / 6%);
+    --shadow-elevation-3: 0 12px 32px oklch(0 0 0 / 55%), 0 0 0 1px oklch(1 0 0 / 6%);
+    --shadow-elevation-4: 0 24px 56px oklch(0 0 0 / 60%), 0 0 0 1px oklch(1 0 0 / 8%);
 }
 
 /*
@@ -98,4 +117,65 @@
   html {
     @apply font-sans;
     }
+}
+
+/*
+ * Queue row entrance (operational-clarity polish pass) — a row is a real,
+ * newly-mounted DOM node only the moment its incident first appears (its
+ * `key` is stable across re-renders/status updates, so this never
+ * re-fires on those); @starting-style fires exactly once, at that mount,
+ * giving "work just arrived" a restrained, non-modal signal without a
+ * JS state machine. Multi-incident behavior requirement: this is the
+ * queue's only feedback for new work — no popup/toast/modal is shown per
+ * incoming incident.
+ */
+.queue-row {
+  transition: opacity 200ms ease-out, transform 200ms ease-out, background-color 150ms ease, border-color 150ms ease;
+}
+@starting-style {
+  .queue-row {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .queue-row {
+    transition: background-color 150ms ease, border-color 150ms ease;
+  }
+  @starting-style {
+    .queue-row {
+      transform: none;
+    }
+  }
+}
+
+/*
+ * Contextual detail panel entrance (persistent-queue redesign) — the
+ * panel now mounts fresh on each /incidents/:id navigation (via
+ * IncidentDetailRoute's key={id}) rather than popping in with zero
+ * transition. A small translateX + opacity entrance, not scale(0) —
+ * nothing in the real world appears from nothing, and the panel is
+ * already edge-anchored so a large slide would fight its fixed position.
+ * Exit animation is deliberately not built (would need a delayed-unmount
+ * state machine — real added complexity for a cut this task's own
+ * "restrained over decorative" instruction doesn't ask for).
+ */
+.detail-panel {
+  transition: transform 240ms cubic-bezier(0.23, 1, 0.32, 1), opacity 240ms ease-out;
+}
+@starting-style {
+  .detail-panel {
+    transform: translateX(2%);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .detail-panel {
+    transition: opacity 240ms ease-out;
+  }
+  @starting-style {
+    .detail-panel {
+      transform: none;
+    }
+  }
 }

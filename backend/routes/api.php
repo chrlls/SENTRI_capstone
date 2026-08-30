@@ -18,6 +18,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/incidents', [IncidentController::class, 'index']);
     Route::get('/incidents/{incident}', [IncidentController::class, 'show']);
+    Route::get('/incidents/{incident}/audio', [IncidentController::class, 'audio']);
     Route::patch('/incidents/{incident}/status', [IncidentController::class, 'updateStatus']);
 
     Route::post('/admin/dispatchers', [DispatcherController::class, 'store']);

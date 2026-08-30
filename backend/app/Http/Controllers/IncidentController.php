@@ -20,6 +20,8 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use Throwable;
 
 class IncidentController extends Controller
@@ -191,19 +193,48 @@ class IncidentController extends Controller
 
         $classification = $action->classification($incident->incident_id);
         $notifications = $action->notifications($incident->incident_id);
+        $statusHistory = $action->statusHistory($incident->incident_id);
+        $keywordMatches = $action->keywordMatches($incident->incident_id);
 
         return response()->json([
             ...$this->formatSummary($incident),
             'location_captured_at' => $incident->location_captured_at,
             'dispatcher_notes' => $incident->dispatcher_notes,
             'incident_notes' => $incident->incident_notes,
+            'reporter' => [
+                'full_name' => $incident->reporter_full_name,
+                'role' => $incident->reporter_role,
+            ],
             'ai_classification' => $classification === null ? null : [
                 'distress_label' => (bool) $classification->distress_label,
                 'distress_confidence' => (float) $classification->distress_confidence,
                 'model_version' => $classification->model_version,
                 'audio_storage_ref' => $classification->audio_storage_ref,
+                'audio_duration_seconds' => $classification->audio_duration_seconds === null ? null : (float) $classification->audio_duration_seconds,
                 'analyzed_at' => $classification->analyzed_at,
             ],
+            'keyword_matches' => array_map(
+                fn (object $m) => [
+                    'match_id' => $m->match_id,
+                    'matched_phrase' => $m->matched_phrase,
+                    'transcript_snippet' => $m->transcript_snippet,
+                    'language' => $m->language,
+                    'matched_at' => $m->matched_at,
+                ],
+                $keywordMatches
+            ),
+            'status_history' => array_map(
+                fn (object $h) => [
+                    'history_id' => $h->history_id,
+                    'old_status' => $h->old_status,
+                    'new_status' => $h->new_status,
+                    'changed_by' => $h->changed_by,
+                    'changed_by_name' => $h->changed_by_name ?? 'System',
+                    'changed_at' => $h->changed_at,
+                    'reason' => $h->reason,
+                ],
+                $statusHistory
+            ),
             'notifications' => [
                 'pnp_dashboard' => $notifications['pnp_dashboard'] === null ? null : [
                     'notification_id' => $notifications['pnp_dashboard']->notification_id,
@@ -263,6 +294,32 @@ class IncidentController extends Controller
         ], 200);
     }
 
+    /**
+     * Streams the most recent completed voice-analysis clip back to an
+     * authorized dashboard client. Gated by the exact same 'view-incident'
+     * check as show() — Decision 21's "no separate, stricter tier" for
+     * audio access applies here too, this is just a second way to reach
+     * the same already-authorized audio_storage_ref. The clip lives on
+     * the private 'local' disk (storage/app/private), never a public URL,
+     * so this route is the only way a dashboard client can ever fetch it.
+     */
+    public function audio(string $incidentId, GetIncidentDetail $action): StreamedResponse|JsonResponse
+    {
+        $incident = $action->find($incidentId);
+
+        if ($incident === null || Gate::denies('view-incident', $incident)) {
+            return response()->json(['error' => 'Incident not found.'], 404);
+        }
+
+        $classification = $action->classification($incidentId);
+
+        if ($classification === null) {
+            return response()->json(['error' => 'No audio available for this incident.'], 404);
+        }
+
+        return Storage::disk('local')->response($classification->audio_storage_ref);
+    }
+
     private function formatSummary(object $incident): array
     {
         return [
@@ -271,6 +328,7 @@ class IncidentController extends Controller
             'trigger_source' => $incident->trigger_source,
             'status' => $incident->status,
             'incident_barangay_id' => $incident->incident_barangay_id,
+            'barangay_name' => $incident->barangay_name,
             'latitude' => (float) $incident->latitude,
             'longitude' => (float) $incident->longitude,
             'ai_confidence_score' => $incident->ai_confidence_score === null ? null : (float) $incident->ai_confidence_score,

@@ -51,6 +51,47 @@ export function formatRelativeTime(timestamp) {
   })
 }
 
+/**
+ * Seconds since an incident was detected -> "02:14" (mm:ss), or "1:02:14"
+ * once past an hour — an incident sitting in the needs-review rail that
+ * long is already a rare, notable case worth the wider format, not the
+ * common one to optimize for.
+ */
+export function formatElapsed(totalSeconds) {
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = Math.floor(totalSeconds % 60)
+
+  const mm = String(minutes).padStart(2, '0')
+  const ss = String(seconds).padStart(2, '0')
+
+  return hours > 0 ? `${hours}:${mm}:${ss}` : `${mm}:${ss}`
+}
+
+/**
+ * The API returns UTC timestamptz strings — a dispatcher working in Tagum
+ * City needs Asia/Manila local time, not raw UTC, for anything read as a
+ * wall-clock moment (location captured at, status history entries).
+ */
+export function formatManilaTime(timestamp) {
+  const date = parseApiTimestamp(timestamp)
+  if (date === null || Number.isNaN(date.getTime())) {
+    return '—'
+  }
+
+  const formatted = date.toLocaleString('en-PH', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  })
+
+  return `${formatted} PHT`
+}
+
 /** "dashboard_alerted" -> "Dashboard Alerted". Shared by every enum-ish field the API returns (status, trigger_source). */
 export function humanizeEnum(value) {
   if (!value) {

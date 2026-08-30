@@ -120,6 +120,12 @@ async function createIncidentAwaitingReview(request) {
 }
 
 test('dispatcher can dispatch an incident with required notes through the real UI', async ({ page, request }) => {
+  // The real Supabase-pooler round-trip this suite depends on is
+  // documented above as occasionally slow; the persistent-queue redesign
+  // added a confirm-dialog round trip and queue rendering on top of the
+  // same real requests, tightening the default 30s budget.
+  test.setTimeout(60000)
+
   const incidentId = await createIncidentAwaitingReview(request)
 
   await page.goto('/login')
@@ -135,9 +141,18 @@ test('dispatcher can dispatch an incident with required notes through the real U
   // GetIncidentDetail's multiple queries occasionally exceeds Playwright's
   // 5s default under real network conditions — not a UI bug, an honest
   // remote-DB latency margin.
-  await expect(page.getByText('Dispatcher Reviewing')).toBeVisible({ timeout: 15000 })
+  // Scoped to the detail panel's own <header> — the persistent-queue
+  // redesign (this same incident's row is simultaneously visible in the
+  // left queue, by design) and the History section's real status_history
+  // rows both also render "Dispatcher Reviewing" text, so a loose
+  // page-wide exact match is now ambiguous; this targets only the header
+  // status badge.
+  await expect(page.locator('header').getByText('Dispatcher Reviewing', { exact: true })).toBeVisible({ timeout: 15000 })
 
-  const dispatchButton = page.getByRole('button', { name: 'Dispatch' })
+  // exact:true — the redesigned page's profile-menu trigger has an
+  // accessible name of "Dispatcher menu" (Phase 3/4), which a loose match
+  // on "Dispatch" would ambiguously match too.
+  const dispatchButton = page.getByRole('button', { name: 'Dispatch', exact: true })
   const notesInput = page.getByLabel('Dispatcher notes (required)').first()
 
   // Required-notes gating: the button must not be clickable before notes
@@ -149,13 +164,26 @@ test('dispatcher can dispatch an incident with required notes through the real U
 
   await dispatchButton.click()
 
+  // Phase 5: clicking the action button now opens a confirm dialog first
+  // — the real PATCH doesn't fire until "Confirm" inside it is clicked.
+  await expect(page.getByRole('alertdialog', { name: 'Confirm dispatch' })).toBeVisible()
+  await page.getByRole('button', { name: 'Confirm' }).click()
+
   // Pending state, then success reflected in place without a reload.
   await expect(page.getByRole('button', { name: 'Dispatching…' })).toBeVisible()
-  await expect(page.getByText('Dispatched', { exact: true })).toBeVisible()
+  // Scoped to the detail panel's own <header> — the persistent-queue
+  // redesign keeps this same incident's row visible in the left queue at
+  // the same time (that's the point of the redesign), and its own status
+  // badge also reads "Dispatched" once the transition lands, so a loose
+  // page-wide match is now ambiguous.
+  await expect(page.locator('header').getByText('Dispatched', { exact: true })).toBeVisible()
   await expect(page.getByText('Responding unit en route (e2e test)')).toBeVisible()
   await expect(page.getByText('No further actions')).not.toBeVisible()
 
   // The next valid actions (Resolve/False Alarm) replace Dispatch.
-  await expect(page.getByRole('button', { name: 'Resolve' })).toBeVisible()
+  // exact:true — the persistent-queue redesign's queue rows show
+  // "Unresolved location" as a fallback barangay label, which loosely
+  // (case-insensitive substring) matches "Resolve" too.
+  await expect(page.getByRole('button', { name: 'Resolve', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'False Alarm' })).toBeVisible()
 })
