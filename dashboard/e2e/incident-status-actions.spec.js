@@ -186,4 +186,38 @@ test('dispatcher can dispatch an incident with required notes through the real U
   // (case-insensitive substring) matches "Resolve" too.
   await expect(page.getByRole('button', { name: 'Resolve', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'False Alarm' })).toBeVisible()
+
+  // The restructured panel announces the outcome in a polite live region
+  // rather than leaving success purely visual.
+  await expect(page.getByText('responders notified', { exact: false })).toBeVisible()
+})
+
+/**
+ * The restructured detail panel drops the "Evidence / AI Assessment: not
+ * applicable" block for manual SOS entirely — a manual report is never
+ * analyzed by AI (docs/decisions/05), so that absence is the normal state
+ * and needs no caption. The AI assessment section exists only for
+ * voice_distress incidents.
+ */
+test('a manual SOS incident shows no AI assessment section', async ({ page, request }) => {
+  test.setTimeout(60000)
+
+  const incidentId = await createIncidentAwaitingReview(request)
+
+  await page.goto('/login')
+  await page.getByPlaceholder('Email').fill(dispatcher.email)
+  await page.getByPlaceholder('Password').fill(dispatcher.password)
+  await page.getByRole('button', { name: 'Login' }).click()
+  await page.waitForURL('/')
+
+  await page.goto(`/incidents/${incidentId}`)
+
+  // Panel has loaded once the trigger label heading and the kept
+  // Who/Where sections are present.
+  await expect(page.getByRole('heading', { name: 'Manual SOS' })).toBeVisible({ timeout: 15000 })
+  await expect(page.getByRole('heading', { name: 'Who' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Where' })).toBeVisible()
+
+  await expect(page.getByRole('heading', { name: 'AI assessment' })).toHaveCount(0)
+  await expect(page.getByText('not analyzed by AI', { exact: false })).toHaveCount(0)
 })

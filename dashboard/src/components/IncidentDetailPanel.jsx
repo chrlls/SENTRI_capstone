@@ -1,4 +1,4 @@
-import { Bell, MapPin, UserRound, X } from 'lucide-react'
+import { X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { IncidentStatusActions } from '@/components/IncidentStatusActions'
@@ -6,20 +6,21 @@ import { AudioEvidencePlayer } from '@/components/AudioEvidencePlayer'
 import { useElapsedSeconds } from '@/hooks/useElapsedSeconds'
 import { formatElapsed, formatManilaTime, humanizeEnum, cn } from '@/lib/utils'
 import { needsReview, statusBadgeVariant, verificationStateFor } from '@/lib/incidentStatus'
-import { triggerSourceLabel } from '@/lib/triggerIcons'
+import { triggerIconElement, triggerSourceLabel } from '@/lib/triggerIcons'
 
-function SectionTitle({ icon: Icon, children }) {
-  return (
-    <div className="flex items-center gap-1.5">
-      {Icon && <Icon className="size-3.5 text-muted-foreground" />}
-      <p className="text-[10.5px] font-semibold tracking-wide text-muted-foreground uppercase">{children}</p>
-    </div>
-  )
+/**
+ * One heading treatment for the whole panel: quiet, sentence-case, no
+ * icon. Separation between sections is carried by the `divide-y` rhythm,
+ * not by a decorative glyph or a box around every group. The header's
+ * trigger label is the panel's <h2>; every section below is an <h3>.
+ */
+function SectionHeading({ children }) {
+  return <h3 className="text-xs font-semibold text-muted-foreground">{children}</h3>
 }
 
 function Field({ label, children }) {
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex flex-col gap-1">
       <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd className="text-sm break-words text-foreground">{children ?? '—'}</dd>
     </div>
@@ -29,8 +30,8 @@ function Field({ label, children }) {
 function WhoSection({ reporter }) {
   return (
     <section className="flex flex-col gap-2">
-      <SectionTitle icon={UserRound}>Who</SectionTitle>
-      <dl className="grid grid-cols-2 gap-x-3 gap-y-2.5">
+      <SectionHeading>Who</SectionHeading>
+      <dl className="grid grid-cols-2 gap-x-3 gap-y-2">
         <Field label="Reporter">{reporter.full_name}</Field>
         <Field label="Role">{humanizeEnum(reporter.role)}</Field>
       </dl>
@@ -39,24 +40,22 @@ function WhoSection({ reporter }) {
 }
 
 /**
- * Coordinates are deliberately subordinate to the barangay name — a small
- * mono caption under it, not a same-weight field beside it — per the
- * detail-panel polish pass's own instruction not to overemphasize raw
- * coordinates. `break-words` on both (not `truncate`) so a long barangay
- * name or an unusually long formatted timestamp wraps within the panel's
+ * Coordinates sit under the barangay name as a subordinate mono caption,
+ * not a same-weight field beside it. `break-words` (not `truncate`) so a
+ * long barangay name or formatted timestamp wraps within the panel's
  * fixed width instead of clipping.
  */
 function WhereSection({ incident }) {
   return (
     <section className="flex flex-col gap-2">
-      <SectionTitle icon={MapPin}>Where</SectionTitle>
-      <dl className="flex flex-col gap-2.5">
-        <div className="flex flex-col gap-0.5">
+      <SectionHeading>Where</SectionHeading>
+      <dl className="flex flex-col gap-2">
+        <div className="flex flex-col gap-1">
           <dt className="text-xs text-muted-foreground">Barangay</dt>
           <dd className="text-sm break-words text-foreground">
             {incident.barangay_name ?? 'Unresolved (outside known boundaries)'}
           </dd>
-          <dd className="font-mono text-[10.5px] break-all text-muted-foreground/70">
+          <dd className="font-mono text-[11px] break-all text-muted-foreground">
             {incident.latitude.toFixed(5)}, {incident.longitude.toFixed(5)}
           </dd>
         </div>
@@ -67,63 +66,25 @@ function WhereSection({ incident }) {
 }
 
 /**
- * The section closest to SENTRI's actual thesis (Decision 06 — dispatch
- * is always a human decision, AI never authorizes it), so it keeps its
- * own bounded card even though every other section in this panel is now
- * flat — that contrast is deliberate: Evidence is the one section besides
- * Decision genuinely operationally load-bearing, and standing out
- * visually from Who/Where/Incident Information is what signals that.
- *
- * Evidence-and-AI polish pass: Evidence now *always* renders, for both
- * trigger sources — a manual SOS was never analyzed by AI, and that
- * absence needs to read as an intentional, correct fact about this
- * report, not as an error/empty/loading state the way an omitted section
- * risked being misread. The two branches below are a hard content split,
- * not a styling difference: manual_sos gets a plain "Manual SOS / Not
- * applicable" statement; voice_distress gets the full recording-player +
- * AI-assessment hierarchy.
- *
- * Within a voice_distress incident: "Voice Recording" (the primary
- * artifact a dispatcher actually verifies against) → a visually separate,
- * clearly-labeled "AI Assessment" sub-block, bounded distinctly from the
- * player so it reads as a secondary annotation, not the headline of the
- * section → a closing line that AI assists verification and never
- * authorizes dispatch. Only fields the API actually returns
- * (distress_label, distress_confidence, model_version, analyzed_at) are
- * shown — no panic level, keyword/emotion category, risk score, or
- * inference-duration field exists in SENTRI's data model, so none is
- * invented here.
+ * AI is only ever part of a voice_distress report. A manual SOS is never
+ * analyzed (Decision 05) and that absence is the normal, correct state —
+ * so the call site omits this section entirely for a non-voice trigger
+ * rather than captioning the absence; the header already says "Manual
+ * SOS". Only fields the API actually returns are shown (distress_label,
+ * distress_confidence, model_version, analyzed_at) — SENTRI's classifier
+ * is binary (Decision 08), so there is no panic level, emotion category,
+ * risk score, or inference-duration field to invent.
  */
-function EvidenceSection({ incident }) {
-  if (incident.trigger_source !== 'voice_distress') {
-    return (
-      <section className="flex flex-col gap-3 rounded-md border border-border bg-card/40 p-3.5">
-        <SectionTitle>Evidence</SectionTitle>
-        <p className="text-sm text-foreground">Manual SOS</p>
-
-        <div className="flex flex-col gap-1 border-t border-border/60 pt-2.5">
-          <p className="text-[10.5px] font-semibold tracking-wide text-muted-foreground uppercase">AI Assessment</p>
-          <p className="text-sm text-muted-foreground">Not applicable — manual SOS reports are not analyzed by AI.</p>
-        </div>
-      </section>
-    )
-  }
-
+function AiAssessmentSection({ incident }) {
   if (incident.ai_classification === null) {
-    // Per API_CONTRACTS.md: on the inconclusive path nothing is written to
-    // disk or to voice_analysis_events at all — a null ai_classification
-    // here means there is structurally no retained clip either, not just
-    // no analysis. Rendering AudioEvidencePlayer anyway would always fail
-    // (a real fetch that's guaranteed to 404), which reads as something
-    // broke rather than as the honest, intentional "nothing was kept"
-    // fact it actually is — so this stays one plain statement, not a
-    // player that predictably errors.
+    // On the inconclusive path nothing is written to disk or to
+    // voice_analysis_events, so a null here also means no clip was kept —
+    // rendering AudioEvidencePlayer would be a fetch guaranteed to 404.
     return (
-      <section className="flex flex-col gap-2 rounded-md border border-border bg-card/40 p-3.5">
-        <SectionTitle>Evidence</SectionTitle>
+      <section className="flex flex-col gap-2">
+        <SectionHeading>AI assessment</SectionHeading>
         <p className="text-xs text-muted-foreground">
-          No classification available, and no audio clip was retained for this report. The report itself is
-          unaffected and still requires the same human review.
+          No classification or audio was retained for this report. It still requires the same human review.
         </p>
       </section>
     )
@@ -135,24 +96,17 @@ function EvidenceSection({ incident }) {
   const isHighConfidence = confidence >= 0.7
 
   return (
-    <section className="flex flex-col gap-3 rounded-md border border-border bg-card/40 p-3.5">
-      <SectionTitle>Evidence</SectionTitle>
+    <section className="flex flex-col gap-3">
+      <SectionHeading>AI assessment</SectionHeading>
 
       <div className="flex flex-col gap-1.5">
-        <p className="text-[10.5px] font-semibold tracking-wide text-muted-foreground uppercase">Voice Recording</p>
+        <p className="text-xs text-muted-foreground">Recording</p>
         <AudioEvidencePlayer incidentId={incident.incident_id} />
       </div>
 
-      {/* premium-finish polish pass: this used to be its own bordered,
-          backgrounded box nested inside the Evidence card — a real "card
-          inside card" the pass calls out directly. A top divider (matching
-          every other sub-section split in this panel) carries the same
-          "this is a distinct sub-group" signal without a second boundary. */}
-      <div className="flex flex-col gap-2 border-t border-border/60 pt-2.5">
-        <p className="text-[10.5px] font-semibold tracking-wide text-muted-foreground uppercase">AI Assessment</p>
-
+      <div className="flex flex-col gap-2 border-t border-border/60 pt-3">
         <div className="flex items-center justify-between">
-          <span className="text-xs text-muted-foreground">Distress label</span>
+          <span className="text-xs text-muted-foreground">Distress</span>
           <span className="text-sm font-medium text-foreground">{distressLabel ? 'Detected' : 'Not detected'}</span>
         </div>
 
@@ -167,19 +121,13 @@ function EvidenceSection({ incident }) {
           <p className="text-[11px] text-muted-foreground">
             {isHighConfidence
               ? 'High confidence — the signal strongly suggests genuine distress.'
-              : 'Lower confidence — treat as a weaker signal alongside other context, not a standalone confirmation.'}
+              : 'Lower confidence — weigh alongside other context, not as a standalone confirmation.'}
           </p>
         </div>
 
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-muted-foreground">Model version</span>
-          <span className="font-mono text-xs text-foreground">{modelVersion}</span>
-        </div>
-
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-muted-foreground">Analyzed at</span>
-          <span className="text-xs text-foreground">{formatManilaTime(analyzedAt)}</span>
-        </div>
+        <p className="font-mono text-[11px] text-muted-foreground">
+          {modelVersion} · analyzed {formatManilaTime(analyzedAt)}
+        </p>
 
         {incident.keyword_matches.length > 0 && (
           <div className="flex flex-wrap gap-1.5 border-t border-border/60 pt-2">
@@ -194,23 +142,15 @@ function EvidenceSection({ incident }) {
           </div>
         )}
       </div>
-
-      <p className="text-xs text-foreground">
-        AI assists verification only. Final response decision is made by the dispatcher.
-      </p>
     </section>
   )
 }
 
-function IncidentInformationSection({ incident }) {
-  if (incident.dispatcher_notes === null && incident.incident_notes === null) {
-    return null
-  }
-
+function NotesSection({ incident }) {
   return (
     <section className="flex flex-col gap-2">
-      <SectionTitle>Incident Information</SectionTitle>
-      <dl className="flex flex-col gap-2.5">
+      <SectionHeading>Notes</SectionHeading>
+      <dl className="flex flex-col gap-2">
         {incident.dispatcher_notes !== null && <Field label="Dispatcher notes">{incident.dispatcher_notes}</Field>}
         {incident.incident_notes !== null && <Field label="Incident notes">{incident.incident_notes}</Field>}
       </dl>
@@ -220,7 +160,7 @@ function IncidentInformationSection({ incident }) {
 
 function HistoryContent({ history }) {
   if (history.length === 0) {
-    return <p className="text-[11px] text-muted-foreground">No status changes yet.</p>
+    return <p className="text-xs text-muted-foreground">No status changes yet.</p>
   }
 
   return (
@@ -257,7 +197,7 @@ function NotificationsContent({ notifications }) {
       </div>
 
       {notifications.barangay_tanod.length === 0 ? (
-        <p className="text-[11px] text-muted-foreground">No responders were matched/notified for this incident.</p>
+        <p className="text-xs text-muted-foreground">No responders were matched or notified for this incident.</p>
       ) : (
         notifications.barangay_tanod.map((n) => (
           <div
@@ -266,7 +206,7 @@ function NotificationsContent({ notifications }) {
           >
             <div className="flex flex-col">
               <span className="text-foreground">{n.full_name}</span>
-              <span className="text-[10.5px] text-muted-foreground">
+              <span className="text-[11px] text-muted-foreground">
                 {n.distance_meters === null ? 'distance unknown' : `${n.distance_meters.toFixed(0)} m away`}
               </span>
             </div>
@@ -279,24 +219,19 @@ function NotificationsContent({ notifications }) {
 }
 
 /**
- * detail-panel information-hierarchy polish pass: previously every
- * section (Who, Where, Notes, History/Notifications) was its own
- * same-weight bordered/shadowed card, and the action area (Decision) sat
- * right under the header — so the panel read as a stack of independent
- * forms rather than one incident record. Restructured around a single
- * conceptual flow instead: identity/status header → flat, divider-
- * separated read sections (Who, Where, Incident Information, History,
- * Notifications) → the one genuinely bounded Evidence card (operationally
- * load-bearing, per the same pass's own instruction) → the Decision area,
- * now last — a dispatcher reads the record top to bottom, then acts.
- * `divide-y` + `first:pt-0` on the flat-section wrapper gives consistent
- * spacing/dividers without every section needing its own border or
- * background.
+ * The panel is one incident record read top to bottom, then acted on: a
+ * flat identity/status header → divider-separated read sections (Who,
+ * Where, AI assessment for voice reports, Notes, History, Notifications) →
+ * the Decision area. Exactly one surface is elevated with a border and
+ * fill — the Decision block — because that is the dispatcher's actual
+ * task; every read section is separated by spacing and a hairline rule
+ * alone, so nothing competes with it for attention.
  */
 export function IncidentDetailPanel({ incident, onUpdated, onClose }) {
   const elapsed = useElapsedSeconds(incident.created_at)
-  const hasIncidentInformation = incident.dispatcher_notes !== null || incident.incident_notes !== null
   const isUrgent = needsReview(incident.status)
+  const isVoiceReport = incident.trigger_source === 'voice_distress'
+  const hasNotes = incident.dispatcher_notes !== null || incident.incident_notes !== null
 
   return (
     <aside className="detail-panel absolute inset-y-0 right-0 z-20 flex w-[26rem] max-w-full flex-col border-l border-border bg-background shadow-elevation-3">
@@ -309,33 +244,34 @@ export function IncidentDetailPanel({ incident, onUpdated, onClose }) {
         <X className="size-4" />
       </button>
 
-      <div className="flex-1 overflow-y-auto p-4 pt-5">
-        <header className="mb-5 flex flex-col gap-2.5 rounded-md border border-border bg-card/60 p-3.5 pr-8">
-          <div className="flex items-center justify-between gap-2">
-            <span className="font-mono text-[11px] text-muted-foreground">
-              #{incident.incident_id.slice(0, 8)}
-            </span>
-            <span className="text-xs text-muted-foreground">{triggerSourceLabel(incident.trigger_source)}</span>
+      <div className="flex-1 overflow-y-auto p-4">
+        <header className="flex flex-col gap-2 pb-4">
+          <div className="flex items-center gap-2 pr-10">
+            {triggerIconElement(incident.trigger_source, 'size-4 shrink-0 text-muted-foreground')}
+            <h2 className="text-sm font-semibold text-foreground">{triggerSourceLabel(incident.trigger_source)}</h2>
+            <span className="font-mono text-[11px] text-muted-foreground">#{incident.incident_id.slice(0, 8)}</span>
           </div>
+
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant={statusBadgeVariant(incident.status)}>{humanizeEnum(incident.status)}</Badge>
-            <Badge variant="outline">{verificationStateFor(incident.status)}</Badge>
+            <span className="text-xs text-muted-foreground">{verificationStateFor(incident.status)}</span>
           </div>
+
           <div className="flex items-baseline gap-2">
             <span
               className={cn(
-                'font-mono text-2xl font-semibold tabular-nums',
+                'font-mono text-xl font-semibold tabular-nums',
                 isUrgent ? 'text-destructive' : 'text-foreground'
               )}
             >
               {elapsed === null ? '—' : formatElapsed(elapsed)}
             </span>
-            <span className="text-xs text-muted-foreground">since detected</span>
+            <span className="text-xs text-muted-foreground">since report</span>
           </div>
         </header>
 
-        <div className="flex flex-col divide-y divide-border/60">
-          <div className="pb-4">
+        <div className="flex flex-col divide-y divide-border/60 border-t border-border/60">
+          <div className="py-4">
             <WhoSection reporter={incident.reporter} />
           </div>
 
@@ -343,34 +279,34 @@ export function IncidentDetailPanel({ incident, onUpdated, onClose }) {
             <WhereSection incident={incident} />
           </div>
 
-          <div className="py-4">
-            <EvidenceSection incident={incident} />
-          </div>
-
-          {hasIncidentInformation && (
+          {isVoiceReport && (
             <div className="py-4">
-              <IncidentInformationSection incident={incident} />
+              <AiAssessmentSection incident={incident} />
+            </div>
+          )}
+
+          {hasNotes && (
+            <div className="py-4">
+              <NotesSection incident={incident} />
             </div>
           )}
 
           <div className="py-4">
+            {/* Radix AccordionTrigger is wrapped in an <h3> already, so the
+                label is a plain span styled to match SectionHeading — no
+                nested heading, no heading inside a button. */}
             <Accordion type="multiple">
               <AccordionItem value="history">
-                <AccordionTrigger>
-                  <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground normal-case">
-                    History
-                  </span>
+                <AccordionTrigger className="text-xs font-semibold text-muted-foreground">
+                  History
                 </AccordionTrigger>
                 <AccordionContent>
                   <HistoryContent history={incident.status_history} />
                 </AccordionContent>
               </AccordionItem>
               <AccordionItem value="notifications">
-                <AccordionTrigger>
-                  <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground normal-case">
-                    <Bell className="size-3.5 text-muted-foreground" />
-                    Notifications
-                  </span>
+                <AccordionTrigger className="text-xs font-semibold text-muted-foreground">
+                  Notifications
                 </AccordionTrigger>
                 <AccordionContent>
                   <NotificationsContent notifications={incident.notifications} />

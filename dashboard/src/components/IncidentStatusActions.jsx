@@ -1,8 +1,8 @@
 import { useId, useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -89,6 +89,25 @@ function confirmCopyFor(status) {
 }
 
 /**
+ * Spoken/rendered confirmation once a transition lands. A successful
+ * status change is otherwise only visible (the badge updates) — a
+ * screen-reader user gets nothing from the existing error-only Alert, so
+ * this goes in a polite live region below.
+ */
+const SUCCESS_COPY = {
+  dispatched: 'Dispatched — responders notified.',
+  resolved: 'Incident resolved.',
+  false_alarm: 'Marked as false alarm.',
+  cancelled: 'Incident cancelled.',
+  dispatcher_reviewing: 'Marked as under review.',
+  dashboard_alerted: 'Moved to dashboard-alerted.',
+}
+
+function successCopyFor(status) {
+  return SUCCESS_COPY[status] ?? `Status changed to ${humanizeEnum(status)}.`
+}
+
+/**
  * detail-panel polish pass: one shared note, not one text input per
  * notes-required status. The previous design gave `dispatched` and
  * `false_alarm` their own separate bordered card, each with its own
@@ -106,6 +125,7 @@ export function IncidentStatusActions({ incident, onUpdated }) {
   const [notes, setNotes] = useState('')
   const [pendingStatus, setPendingStatus] = useState(null)
   const [error, setError] = useState(null)
+  const [outcome, setOutcome] = useState(null) // last successful transition's confirmation text
   const [confirming, setConfirming] = useState(null) // { status, notes } | null
 
   const nextStatuses = nextStatusesFor(incident.status)
@@ -113,12 +133,14 @@ export function IncidentStatusActions({ incident, onUpdated }) {
   async function handleTransition(status, transitionNotes) {
     setConfirming(null)
     setError(null)
+    setOutcome(null)
     setPendingStatus(status)
 
     try {
       const updated = await updateIncidentStatus(incident.incident_id, status, transitionNotes)
       onUpdated(updated)
       setNotes('')
+      setOutcome(successCopyFor(status))
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Unable to reach the server. Check your connection and try again.')
     } finally {
@@ -128,8 +150,13 @@ export function IncidentStatusActions({ incident, onUpdated }) {
 
   if (nextStatuses.length === 0) {
     return (
-      <section className="flex flex-col gap-1.5">
-        <h3 className="text-[10.5px] font-semibold tracking-wide text-muted-foreground uppercase">Decision</h3>
+      <section className="flex flex-col gap-2">
+        <h3 className="text-xs font-semibold text-muted-foreground">Decision</h3>
+        {outcome !== null && (
+          <p role="status" aria-live="polite" className="text-sm text-foreground">
+            {outcome}
+          </p>
+        )}
         <p className="text-sm text-muted-foreground">No further actions — this incident is in a terminal state.</p>
       </section>
     )
@@ -154,7 +181,7 @@ export function IncidentStatusActions({ incident, onUpdated }) {
 
   return (
     <section className="flex flex-col gap-3">
-      <h3 className="text-[10.5px] font-semibold tracking-wide text-muted-foreground uppercase">Decision</h3>
+      <h3 className="text-xs font-semibold text-muted-foreground">Decision</h3>
 
       {error !== null && (
         <Alert variant="destructive">
@@ -162,17 +189,25 @@ export function IncidentStatusActions({ incident, onUpdated }) {
         </Alert>
       )}
 
+      {outcome !== null && error === null && (
+        <p role="status" aria-live="polite" className="text-sm text-foreground">
+          {outcome}
+        </p>
+      )}
+
       {notesAreNeeded && (
         <div className="flex flex-col gap-1.5">
           <Label htmlFor={notesId} className="text-xs text-muted-foreground">
             Dispatcher notes (required)
           </Label>
-          <Input
+          <Textarea
             id={notesId}
+            rows={2}
             value={notes}
             onChange={(event) => setNotes(event.target.value)}
             disabled={disabled}
             placeholder="Reason for this decision…"
+            className="resize-none"
           />
         </div>
       )}
