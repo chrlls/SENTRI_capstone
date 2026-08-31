@@ -179,3 +179,26 @@
     }
   }
 }
+
+/*
+ * MapLibre popup chrome reset — the marker hover card (MarkerTooltip in
+ * components/map/Map.jsx) already renders its own fully-styled dark
+ * surface (bg-popover + border-border + shadow-elevation-2). MapLibre
+ * GL's stock .maplibregl-popup-content ships a white background with
+ * padding, a border-radius and a drop shadow, and .maplibregl-popup-tip
+ * a white pointer triangle — together they framed the dark card in
+ * white on the map. Strip the wrapper back to a bare positioning
+ * container and drop the tip so only SENTRI's own card shows.
+ */
+/* Scoped under .maplibregl-map so these win on specificity over
+ * maplibre-gl.dist.css's own single-class rules regardless of stylesheet
+ * import order (the library's CSS loads after this file in the bundle). */
+.maplibregl-map .maplibregl-popup-content {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.maplibregl-map .maplibregl-popup-tip {
+  display: none;
+}
