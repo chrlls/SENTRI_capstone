@@ -51,6 +51,26 @@ class HoldToConfirmSosButton extends StatefulWidget {
 
   final Duration holdDuration;
 
+  /// Idle-state centre label. Defaults to the full SOS screen's wording;
+  /// the app-shell nav-bar button overrides it with a short "SOS" so the
+  /// same widget (same hold gate) can be reused at a smaller footprint
+  /// without the multi-line label becoming illegible once scaled down.
+  /// Only the idle, not-yet-holding label is affected — the holding /
+  /// sending / sent labels are unchanged.
+  final String idleLabel;
+
+  /// Optional style override for [idleLabel] (again for the smaller
+  /// nav-bar reuse, where the default 18px reads too small after the
+  /// scale-down). Null keeps the default idle style.
+  final TextStyle? idleLabelStyle;
+
+  /// The soft radial halo rings behind the disc. On by default (the full
+  /// SOS screen). The app-shell nav-bar button turns them off: nested in
+  /// the pill's notch the halo would read as a "glow" around the SOS
+  /// circle and defeat the separation-ring illusion. The particle field
+  /// and every phase behaviour are unaffected.
+  final bool showHalo;
+
   /// Duration of the full "sent" success transition (disc + particle field
   /// crossfading to green, checkmark entrance). Exposed so callers that
   /// chain further navigation after a successful send can wait for this
@@ -63,6 +83,9 @@ class HoldToConfirmSosButton extends StatefulWidget {
     required this.onHoldComplete,
     this.onHoldProgress,
     this.holdDuration = const Duration(milliseconds: 2500),
+    this.idleLabel = 'HOLD TO\nSEND SOS',
+    this.idleLabelStyle,
+    this.showHalo = true,
   });
 
   @override
@@ -162,6 +185,14 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
     )..addStatusListener(_handleCancelDecayStatus);
 
     _particles = generateSosParticles();
+
+    // Constructed already in the `sent` phase (e.g. an SOS was fired from
+    // the app-shell nav button, and the full SOS screen is opened
+    // afterward): there's no idle→sent transition for `didUpdateWidget` to
+    // catch, so settle straight into the confirmed look with no burst.
+    if (widget.phase == SosButtonPhase.sent) {
+      _sentBurstController.value = 1.0;
+    }
   }
 
   /// Continuous motion (idle breath, particle emission clock) runs only
@@ -486,6 +517,7 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
                   idlePulse: idlePulse,
                   transmitting: transmitting,
                   transmitPulse: transmitPulse,
+                  showHalo: widget.showHalo,
                 ),
                 child: Center(
                   child: SizedBox(
@@ -496,6 +528,8 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
                         phase: phase,
                         holdProgress: _holdProgress,
                         sentBurst: sentBurst,
+                        idleLabel: widget.idleLabel,
+                        idleLabelStyle: widget.idleLabelStyle,
                       ),
                     ),
                   ),
@@ -513,11 +547,15 @@ class _ButtonLabel extends StatelessWidget {
   final SosButtonPhase phase;
   final double holdProgress;
   final double sentBurst;
+  final String idleLabel;
+  final TextStyle? idleLabelStyle;
 
   const _ButtonLabel({
     required this.phase,
     required this.holdProgress,
     required this.sentBurst,
+    required this.idleLabel,
+    required this.idleLabelStyle,
   });
 
   @override
@@ -630,15 +668,16 @@ class _ButtonLabel extends StatelessWidget {
             ],
           );
         }
-        return const Text(
-          'HOLD TO\nSEND SOS',
+        return Text(
+          idleLabel,
           textAlign: TextAlign.center,
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 18,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 1.0,
-          ),
+          style: idleLabelStyle ??
+              const TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 1.0,
+              ),
         );
     }
   }
@@ -665,6 +704,9 @@ class _SosButtonPainter extends CustomPainter {
   /// clock cycle). 0 outside the transmit state.
   final double transmitPulse;
 
+  /// When false, [_paintHalo] is skipped entirely (app-shell nav-bar use).
+  final bool showHalo;
+
   _SosButtonPainter({
     required this.emissionClock,
     required this.emissionIntensity,
@@ -675,6 +717,7 @@ class _SosButtonPainter extends CustomPainter {
     required this.idlePulse,
     required this.transmitting,
     required this.transmitPulse,
+    required this.showHalo,
   });
 
   bool get _atRest => emissionIntensity == 0 && confirmProgress <= 0;
@@ -684,7 +727,9 @@ class _SosButtonPainter extends CustomPainter {
     final center = Offset(size.width / 2, size.height / 2);
     const radius = _discRadius;
 
-    _paintHalo(canvas, center, radius);
+    if (showHalo) {
+      _paintHalo(canvas, center, radius);
+    }
 
     // The disc is a precise, undistorted circle in every phase — shape,
     // size, and position never change, only color. `lerpWarmToSafeColor`
@@ -776,7 +821,8 @@ class _SosButtonPainter extends CustomPainter {
         oldDelegate.reduceMotion != reduceMotion ||
         oldDelegate.idlePulse != idlePulse ||
         oldDelegate.transmitting != transmitting ||
-        oldDelegate.transmitPulse != transmitPulse;
+        oldDelegate.transmitPulse != transmitPulse ||
+        oldDelegate.showHalo != showHalo;
   }
 }
 

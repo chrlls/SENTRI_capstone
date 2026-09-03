@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'controllers/sos_controller.dart';
 import 'providers/auth_provider.dart';
 import 'screens/login_screen.dart';
 import 'services/incident_status_store.dart';
@@ -27,6 +28,18 @@ class SentriApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => IncidentStatusStore()),
+        // The manual-SOS submission flow, shared by the SOS screen and the
+        // app shell's nav-bar SOS button (task Resolution D). Depends on
+        // the two providers above; created once — its inputs are stable.
+        ChangeNotifierProxyProvider2<AuthProvider, IncidentStatusStore,
+            SosController>(
+          create: (context) => SosController(
+            context.read<AuthProvider>().apiClient,
+            context.read<IncidentStatusStore>(),
+          ),
+          update: (context, auth, store, previous) =>
+              previous ?? SosController(auth.apiClient, store),
+        ),
       ],
       child: MaterialApp(
         title: 'SENTRI',

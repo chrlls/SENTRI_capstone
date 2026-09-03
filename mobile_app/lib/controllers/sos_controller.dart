@@ -1,0 +1,282 @@
+import 'package:flutter/foundation.dart';
+import 'package:geolocator/geolocator.dart';
+
+import '../services/incident_status_store.dart';
+import '../services/sentri_api_client.dart';
+import '../widgets/hold_to_confirm_sos_button.dart' show SosButtonPhase;
+
+/// Thrown by [SosController._acquireLocation] — a device-permission
+/// concept, not an API error, so it stays here rather than in the shared
+/// API client.
+class LocationUnavailableException implements Exception {
+  final String message;
+  LocationUnavailableException(this.message);
+}
+
+/// Test-only failure injectors, toggled with `--dart-define`. Each drives
+/// the matching real failure path without needing a broken device or an
+/// unreachable server:
+///   --dart-define=FAIL_GPS=true      → no location fix is obtainable
+///   --dart-define=FAIL_NETWORK=true  → the manual-sos request never
+///                                      reaches the server
+/// Both compile to `false` in any build that doesn't define them. They
+/// exist to exercise audit item 1.1 (a GPS failure and a network failure
+/// must produce visibly different outcomes); see docs/decisions/31. Moved
+/// here from `sos_screen.dart` unchanged so the same hooks still cover the
+/// submission path now that it is shared with the app-shell nav button.
+const bool _simulateGpsFailure = bool.fromEnvironment('FAIL_GPS');
+const bool _simulateNetworkFailure = bool.fromEnvironment('FAIL_NETWORK');
+
+/// Thrown only by the injectors above, to reach the same catch/branch a
+/// genuine device or transport fault would. Never thrown in normal use.
+class _SimulatedFailure implements Exception {
+  final String kind;
+  const _SimulatedFailure(this.kind);
+}
+
+/// One sub-step of the sending sequence (the SOS screen's GPS / Network /
+/// Alert row). `idle` = not started this attempt; `working` = in progress;
+/// `ok`/`failed` = settled. Kept separate per step so a GPS failure and a
+/// network failure produce visibly different outcomes (audit item 1.1).
+enum StepStatus { idle, working, ok, failed }
+
+/// Owns the manual-SOS submission flow — GPS acquisition, the `manual-sos`
+/// request, and handing the new `incident_id` to [IncidentStatusStore] —
+/// so the full [SosScreen] and the app shell's nav-bar SOS button fire the
+/// *same* logic instead of holding two copies of the submission call
+/// (task Resolution D). Screen-specific pre-send UI (the location-blocked
+/// panel, the GPS pill, the location-status lifecycle) stays in
+/// `SosScreen`; this covers only the send itself.
+///
+/// Decision 05 / Decision 28 point 5: this path has zero dependency on the
+/// AI pipeline or on network availability, and nothing here is awaited
+/// before a hold gesture can begin — the gesture lives entirely in
+/// [HoldToConfirmSosButton]; this is only invoked once that gesture has
+/// already completed.
+class SosController extends ChangeNotifier {
+  SosController(this._apiClient, this._statusStore);
+
+  final SentriApiClient _apiClient;
+  final IncidentStatusStore _statusStore;
+
+  SosButtonPhase _phase = SosButtonPhase.idle;
+  String? _errorMessage;
+  StepStatus _gpsStep = StepStatus.idle;
+  StepStatus _networkStep = StepStatus.idle;
+  StepStatus _alertStep = StepStatus.idle;
+  DateTime? _sosSentAt;
+  double? _lastSosLatitude;
+  double? _lastSosLongitude;
+  bool _inFlight = false;
+
+  SosButtonPhase get phase => _phase;
+  String? get errorMessage => _errorMessage;
+  StepStatus get gpsStep => _gpsStep;
+  StepStatus get networkStep => _networkStep;
+  StepStatus get alertStep => _alertStep;
+
+  /// Non-null once a manual SOS has succeeded this session. Drives the SOS
+  /// screen's persistent "SOS sent" status card; nothing clears it
+  /// (Decision 31 screen 4 — no navigation, no timer-based dismissal).
+  DateTime? get sosSentAt => _sosSentAt;
+
+  /// Coordinates the last successful SOS was sent with, reused if the
+  /// civilian later opens the optional voice-message flow.
+  double? get lastSosLatitude => _lastSosLatitude;
+  double? get lastSosLongitude => _lastSosLongitude;
+
+  /// Acquire a device fix, then submit. Both the SOS screen's hold gesture
+  /// and the app shell's nav-bar hold gesture call exactly this.
+  Future<void> fireManualSos({required String? token}) async {
+    if (_inFlight || _phase != SosButtonPhase.idle) {
+      return;
+    }
+    _inFlight = true;
+    _phase = SosButtonPhase.sending;
+    _errorMessage = null;
+    _gpsStep = StepStatus.working;
+    _networkStep = StepStatus.idle;
+    _alertStep = StepStatus.idle;
+    notifyListeners();
+
+    final Position position;
+    try {
+      position = await _acquireLocation();
+    } on LocationUnavailableException catch (e) {
+      // GPS failed — visibly distinct from a network/server failure. The
+      // send never left the device; the phase returns to idle so the
+      // civilian can retry.
+      _gpsStep = StepStatus.failed;
+      _phase = SosButtonPhase.idle;
+      _errorMessage = e.message;
+      _inFlight = false;
+      notifyListeners();
+      return;
+    }
+    _gpsStep = StepStatus.ok;
+    _networkStep = StepStatus.working;
+    _alertStep = StepStatus.working;
+    notifyListeners();
+
+    try {
+      await _submit(
+        token: token,
+        latitude: position.latitude,
+        longitude: position.longitude,
+      );
+    } catch (e) {
+      _handleSubmitFailure(e);
+    }
+    _inFlight = false;
+  }
+
+  /// Submit against an already-known fix — the SOS screen's "send with
+  /// last known location" path, used when live location is blocked.
+  Future<void> submitWithKnownPosition({
+    required String? token,
+    required double latitude,
+    required double longitude,
+  }) async {
+    if (_inFlight || _phase != SosButtonPhase.idle) {
+      return;
+    }
+    _inFlight = true;
+    _phase = SosButtonPhase.sending;
+    _errorMessage = null;
+    _gpsStep = StepStatus.ok; // using a stored last-known fix
+    _networkStep = StepStatus.working;
+    _alertStep = StepStatus.working;
+    notifyListeners();
+
+    try {
+      await _submit(token: token, latitude: latitude, longitude: longitude);
+    } catch (e) {
+      _handleSubmitFailure(e);
+    }
+    _inFlight = false;
+  }
+
+  /// Clears a settled error so a dismissed shell banner stays dismissed.
+  void clearError() {
+    if (_errorMessage == null) {
+      return;
+    }
+    _errorMessage = null;
+    notifyListeners();
+  }
+
+  /// Verbatim from the former `_SosScreenState._acquireLocation` — only the
+  /// surrounding class changed.
+  Future<Position> _acquireLocation() async {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      throw LocationUnavailableException(
+        'Location services are turned off. Enable location and try again.',
+      );
+    }
+
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        throw LocationUnavailableException(
+          'Location permission denied. SENTRI needs your location to send an SOS.',
+        );
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      throw LocationUnavailableException(
+        'Location permission is permanently denied. Enable it in system settings.',
+      );
+    }
+
+    try {
+      if (_simulateGpsFailure) {
+        // Behaves like a device that can't produce a fix at all — the
+        // real catch below then runs the fallback + throw path.
+        throw const _SimulatedFailure('gps');
+      }
+      return await Geolocator.getCurrentPosition(
+        // Bound the wait: without a limit `getCurrentPosition` blocks
+        // until a fresh fix arrives, which can be never (weak signal,
+        // indoors) — the civilian would sit on "SENDING SOS" forever with
+        // no error. On timeout, fall back to the last known fix if there
+        // is one rather than failing outright.
+        locationSettings: const LocationSettings(
+          timeLimit: Duration(seconds: 12),
+        ),
+      );
+    } catch (_) {
+      final lastKnown = _simulateGpsFailure
+          ? null
+          : await Geolocator.getLastKnownPosition();
+      if (lastKnown != null) return lastKnown;
+      // A GPS fix timing out / failing is a location problem, not a server
+      // one — classify it as such so the caller shows the right message
+      // (audit 1.1: a GPS failure must not read as "couldn't reach the
+      // server").
+      throw LocationUnavailableException(
+        'Couldn\'t get a location fix. Move to an open area and try again.',
+      );
+    }
+  }
+
+  /// Fires the `manual-sos` request. On `201`, records the send and hands
+  /// the `incident_id` to [IncidentStatusStore] to start polling. Verbatim
+  /// logic from the former `_SosScreenState._submitManualSos`, minus the
+  /// widget `mounted` guards (a [ChangeNotifier] has no such lifecycle).
+  Future<void> _submit({
+    required String? token,
+    required double latitude,
+    required double longitude,
+  }) async {
+    if (token == null) {
+      throw ApiException(401, 'You are not logged in. Please log in again.');
+    }
+
+    if (_simulateNetworkFailure) {
+      // Reaches `_handleSubmitFailure` as a non-ApiException, exactly as a
+      // real socket/DNS/timeout failure would — its server-unreachable
+      // branch then runs.
+      throw const _SimulatedFailure('network');
+    }
+
+    final result = await _apiClient.manualSos(
+      token: token,
+      latitude: latitude,
+      longitude: longitude,
+    );
+
+    _phase = SosButtonPhase.sent;
+    _sosSentAt = DateTime.now();
+    _lastSosLatitude = latitude;
+    _lastSosLongitude = longitude;
+    _networkStep = StepStatus.ok;
+    _alertStep = StepStatus.ok;
+
+    final incidentId = result['incident_id'] as String?;
+    if (incidentId != null) {
+      _statusStore.startTracking(incidentId: incidentId, token: token);
+    }
+    notifyListeners();
+  }
+
+  /// Verbatim branching from the former `_SosScreenState._handleSubmitFailure`.
+  void _handleSubmitFailure(Object error) {
+    _phase = SosButtonPhase.idle;
+    _alertStep = StepStatus.failed;
+    if (error is ApiException) {
+      // The request reached the server — it rejected it. Show the server's
+      // own message (auth expired / validation / 500).
+      _networkStep = StepStatus.ok;
+      _errorMessage = error.message;
+    } else {
+      // Socket / timeout / DNS — the request never reached the server.
+      _networkStep = StepStatus.failed;
+      _errorMessage =
+          'Couldn\'t reach the server. Check your connection and try again.';
+    }
+    notifyListeners();
+  }
+}

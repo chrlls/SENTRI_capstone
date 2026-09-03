@@ -3,8 +3,8 @@ import 'package:provider/provider.dart';
 
 import '../providers/auth_provider.dart';
 import '../theme/sentri_colors.dart';
+import 'app_shell.dart';
 import 'register_screen.dart';
-import 'sos_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   final String? successMessage;
@@ -44,7 +44,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (success) {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const SosScreen()),
+        MaterialPageRoute(builder: (_) => const AppShell()),
       );
     }
   }

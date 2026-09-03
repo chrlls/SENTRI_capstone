@@ -2,59 +2,26 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 
+import '../controllers/sos_controller.dart';
 import '../providers/auth_provider.dart';
 import '../services/incident_status_store.dart';
-import '../services/sentri_api_client.dart';
 import '../theme/sentri_colors.dart';
 import '../widgets/hold_to_confirm_sos_button.dart';
 import 'voice_sos_screen.dart';
 
-/// Thrown by [SosScreen._acquireLocation] — kept local to this screen
-/// rather than in the shared API client, since it's a device-permission
-/// concept, not an API error.
-class LocationUnavailableException implements Exception {
-  final String message;
-  LocationUnavailableException(this.message);
-}
-
-/// Test-only failure injectors, toggled with `--dart-define`. Each drives
-/// the matching real failure path without needing a broken device or an
-/// unreachable server:
-///   --dart-define=FAIL_GPS=true      → no location fix is obtainable
-///   --dart-define=FAIL_NETWORK=true  → the manual-sos request never
-///                                      reaches the server
-/// Both compile to `false` in any build that doesn't define them. They
-/// exist to exercise audit item 1.1 (a GPS failure and a network failure
-/// must produce visibly different outcomes); see docs/decisions/31.
-const bool _simulateGpsFailure = bool.fromEnvironment('FAIL_GPS');
-const bool _simulateNetworkFailure = bool.fromEnvironment('FAIL_NETWORK');
-
-/// Thrown only by the injectors above, to reach the same catch/branch a
-/// genuine device or transport fault would. Never thrown in normal use.
-class _SimulatedFailure implements Exception {
-  final String kind;
-  const _SimulatedFailure(this.kind);
-}
-
-enum _LocationStatus { checking, ready, notYetRequested, blocked }
-
-enum _LocationBlockReason { serviceDisabled, permissionDenied }
-
-/// One sub-step of the sending sequence (screen 3's GPS / Network / Alert
-/// row). `idle` = not started this attempt; `working` = in progress;
-/// `ok`/`failed` = settled. Kept separate per step so a GPS failure and a
-/// network failure produce visibly different outcomes (audit item 1.1).
-enum _StepStatus { idle, working, ok, failed }
-
+/// The manual-SOS submission itself — GPS acquisition, the `manual-sos`
+/// request, and the incident-status hand-off — lives in [SosController]
+/// (app-root provider), shared with the app shell's nav-bar SOS button so
+/// there is exactly one copy of that logic. The `--dart-define=FAIL_GPS` /
+/// `FAIL_NETWORK` test injectors moved there with it and still cover both
+/// entry points (see docs/decisions/31).
+///
 /// docs/decisions/28-flutter-manual-sos-mvp.md, point 5: this screen must
 /// not depend on or be gated by anything related to a future voice/AI
 /// trigger path — manual SOS itself stays self-contained (Decision 05's
 /// "manual SOS never gated" at the widget level). The voice-assisted flow
 /// is a deliberately separate, second incident and is now only reached
-/// when the civilian taps "Add a voice message" *after* a successful send
-/// — the send itself never navigates anywhere or touches the voice/AI
-/// path. See voice_sos_screen.dart's own docs for why that boundary
-/// matters.
+/// when the civilian taps "Add a voice message" *after* a successful send.
 class SosScreen extends StatefulWidget {
   const SosScreen({super.key});
 
@@ -62,35 +29,26 @@ class SosScreen extends StatefulWidget {
   State<SosScreen> createState() => _SosScreenState();
 }
 
-class _SosScreenState extends State<SosScreen> with WidgetsBindingObserver {
-  SosButtonPhase _phase = SosButtonPhase.idle;
-  String? _errorMessage;
+enum _LocationStatus { checking, ready, notYetRequested, blocked }
 
+enum _LocationBlockReason { serviceDisabled, permissionDenied }
+
+class _SosScreenState extends State<SosScreen> with WidgetsBindingObserver {
   _LocationStatus _locationStatus = _LocationStatus.checking;
   _LocationBlockReason? _blockReason;
   Position? _lastKnownPosition;
 
-  /// Non-null once a manual SOS has succeeded this session. Drives the
-  /// persistent "SOS sent" status line and the "Add a voice message"
-  /// button — both stay on screen from here on; nothing clears this.
-  DateTime? _sosSentAt;
-
-  /// Coordinates the last successful SOS was sent with, reused if the
-  /// civilian later opens the optional voice-message flow (its own
-  /// separate incident, sent against the same location).
-  double? _lastSosLatitude;
-  double? _lastSosLongitude;
+  /// Local surface for the one screen-specific error that isn't a
+  /// submission failure: opening the voice-message flow without the
+  /// token/coords it needs. Shown in the same slot as
+  /// [SosController.errorMessage].
+  String? _voiceMessageError;
 
   /// Mirror of the button's live hold fraction (0..1), reported via
   /// `onHoldProgress`. Only used to show the "Release to cancel" hint and
   /// the shield panel below the button while a hold is in progress
   /// (screen 2). Never fed back into the button or the gate.
   double _screenHoldProgress = 0;
-
-  /// The three sending sub-steps (screen 3's GPS / Network / Alert row).
-  _StepStatus _gpsStep = _StepStatus.idle;
-  _StepStatus _networkStep = _StepStatus.idle;
-  _StepStatus _alertStep = _StepStatus.idle;
 
   @override
   void initState() {
@@ -151,98 +109,21 @@ class _SosScreenState extends State<SosScreen> with WidgetsBindingObserver {
     });
   }
 
-  Future<Position> _acquireLocation() async {
-    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      throw LocationUnavailableException(
-        'Location services are turned off. Enable location and try again.',
-      );
-    }
-
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
-        throw LocationUnavailableException(
-          'Location permission denied. SENTRI needs your location to send an SOS.',
-        );
-      }
-    }
-
-    if (permission == LocationPermission.deniedForever) {
-      throw LocationUnavailableException(
-        'Location permission is permanently denied. Enable it in system settings.',
-      );
-    }
-
-    try {
-      if (_simulateGpsFailure) {
-        // Behaves like a device that can't produce a fix at all — the
-        // real catch below then runs the fallback + throw path.
-        throw const _SimulatedFailure('gps');
-      }
-      return await Geolocator.getCurrentPosition(
-        // Bound the wait: without a limit `getCurrentPosition` blocks
-        // until a fresh fix arrives, which can be never (weak signal,
-        // indoors) — the civilian would sit on "SENDING SOS" forever with
-        // no error. On timeout, fall back to the last known fix if there
-        // is one rather than failing outright.
-        locationSettings: const LocationSettings(
-          timeLimit: Duration(seconds: 12),
-        ),
-      );
-    } catch (_) {
-      final lastKnown = _simulateGpsFailure
-          ? null
-          : await Geolocator.getLastKnownPosition();
-      if (lastKnown != null) return lastKnown;
-      // A GPS fix timing out / failing is a location problem, not a server
-      // one — classify it as such so the caller shows the right message
-      // (audit 1.1: a GPS failure must not read as "couldn't reach the
-      // server").
-      throw LocationUnavailableException(
-        'Couldn\'t get a location fix. Move to an open area and try again.',
-      );
-    }
-  }
-
   Future<void> _handleHoldComplete() async {
     setState(() {
-      _phase = SosButtonPhase.sending;
-      _errorMessage = null;
       _screenHoldProgress = 0;
-      _gpsStep = _StepStatus.working;
-      _networkStep = _StepStatus.idle;
-      _alertStep = _StepStatus.idle;
+      _voiceMessageError = null;
     });
-
-    final Position position;
-    try {
-      position = await _acquireLocation();
-    } on LocationUnavailableException catch (e) {
-      if (!mounted) return;
-      // GPS failed — visibly distinct from a network/server failure. The
-      // send never left the device; the button returns to idle so the
-      // civilian can retry.
-      setState(() {
-        _gpsStep = _StepStatus.failed;
-        _phase = SosButtonPhase.idle;
-        _errorMessage = e.message;
-      });
-      await _refreshLocationStatus();
+    final sos = context.read<SosController>();
+    await sos.fireManualSos(token: context.read<AuthProvider>().token);
+    if (!mounted) {
       return;
     }
-    if (!mounted) return;
-    setState(() {
-      _gpsStep = _StepStatus.ok;
-      _networkStep = _StepStatus.working;
-      _alertStep = _StepStatus.working;
-    });
-
-    try {
-      await _submitManualSos(position.latitude, position.longitude);
-    } catch (e) {
-      _handleSubmitFailure(e);
+    // A GPS failure is the one outcome that changes what this screen shows
+    // next (the location-status row / blocked panel), so re-read it — same
+    // as before the submission logic moved into the controller.
+    if (sos.gpsStep == StepStatus.failed) {
+      await _refreshLocationStatus();
     }
   }
 
@@ -252,72 +133,23 @@ class _SosScreenState extends State<SosScreen> with WidgetsBindingObserver {
       return;
     }
 
-    setState(() {
-      _phase = SosButtonPhase.sending;
-      _errorMessage = null;
-      _screenHoldProgress = 0;
-      _gpsStep = _StepStatus.ok; // using a stored last-known fix
-      _networkStep = _StepStatus.working;
-      _alertStep = _StepStatus.working;
-    });
+    setState(() => _screenHoldProgress = 0);
 
-    try {
-      await _submitManualSos(position.latitude, position.longitude);
-    } catch (e) {
-      _handleSubmitFailure(e);
-    }
-  }
-
-  /// Fires the `manual-sos` request. On `201`, records the send, hands the
-  /// `incident_id` to [IncidentStatusStore] to start polling, and leaves
-  /// the button in its persistent confirmed (green) state — Decision 31
-  /// screen 4, no navigation, no timer-based dismissal.
-  Future<void> _submitManualSos(double latitude, double longitude) async {
-    final auth = context.read<AuthProvider>();
-    final store = context.read<IncidentStatusStore>();
-    final token = auth.token;
-    if (token == null) {
-      throw ApiException(401, 'You are not logged in. Please log in again.');
-    }
-
-    if (_simulateNetworkFailure) {
-      // Reaches `_handleSubmitFailure` as a non-ApiException, exactly as a
-      // real socket/DNS/timeout failure would — its server-unreachable
-      // branch then runs.
-      throw const _SimulatedFailure('network');
-    }
-
-    final result = await auth.apiClient.manualSos(
-      token: token,
-      latitude: latitude,
-      longitude: longitude,
-    );
-
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _phase = SosButtonPhase.sent;
-      _sosSentAt = DateTime.now();
-      _lastSosLatitude = latitude;
-      _lastSosLongitude = longitude;
-      _networkStep = _StepStatus.ok;
-      _alertStep = _StepStatus.ok;
-    });
-
-    final incidentId = result['incident_id'] as String?;
-    if (incidentId != null) {
-      store.startTracking(incidentId: incidentId, token: token);
-    }
+    await context.read<SosController>().submitWithKnownPosition(
+          token: context.read<AuthProvider>().token,
+          latitude: position.latitude,
+          longitude: position.longitude,
+        );
   }
 
   void _openVoiceMessage() {
+    final sos = context.read<SosController>();
     final token = context.read<AuthProvider>().token;
-    final latitude = _lastSosLatitude;
-    final longitude = _lastSosLongitude;
+    final latitude = sos.lastSosLatitude;
+    final longitude = sos.lastSosLongitude;
     if (token == null || latitude == null || longitude == null) {
       setState(
-        () => _errorMessage = 'Please log in again to add a voice message.',
+        () => _voiceMessageError = 'Please log in again to add a voice message.',
       );
       return;
     }
@@ -332,38 +164,18 @@ class _SosScreenState extends State<SosScreen> with WidgetsBindingObserver {
     );
   }
 
-  void _handleSubmitFailure(Object error) {
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _phase = SosButtonPhase.idle;
-      _alertStep = _StepStatus.failed;
-      if (error is ApiException) {
-        // The request reached the server — it rejected it. Show the
-        // server's own message (auth expired / validation / 500).
-        _networkStep = _StepStatus.ok;
-        _errorMessage = error.message;
-      } else {
-        // Socket / timeout / DNS — the request never reached the server.
-        _networkStep = _StepStatus.failed;
-        _errorMessage =
-            'Couldn\'t reach the server. Check your connection and try again.';
-      }
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
-    // Read from the app-root store — Decision 31 §1: the incident poller
-    // lives above navigation and is never gated on the current screen;
-    // this screen just reads it.
+    // Read from the app-root providers — Decision 31 §1: the incident
+    // poller lives above navigation; the submission state now lives in the
+    // shared [SosController]. This screen renders both, owns neither.
+    final sos = context.watch<SosController>();
     final incidentStore = context.watch<IncidentStatusStore>();
+    final displayedError = sos.errorMessage ?? _voiceMessageError;
     final holding =
-        _phase == SosButtonPhase.idle && _screenHoldProgress > 0.001;
-    final blockedPanelShowing =
-        _locationStatus == _LocationStatus.blocked &&
-        _phase != SosButtonPhase.sent;
+        sos.phase == SosButtonPhase.idle && _screenHoldProgress > 0.001;
+    final blockedPanelShowing = _locationStatus == _LocationStatus.blocked &&
+        sos.phase != SosButtonPhase.sent;
 
     return Scaffold(
       backgroundColor: SentriColors.background,
@@ -379,7 +191,10 @@ class _SosScreenState extends State<SosScreen> with WidgetsBindingObserver {
           ),
         ],
       ),
-      bottomNavigationBar: const _HomeBottomNav(),
+      // No bottom navigation here: the app shell owns navigation now, and
+      // the SOS screen is a pushed destination reached by tapping the
+      // shell's SOS button — not a tab. (The former no-op `_HomeBottomNav`
+      // placeholder was removed with this change.)
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -394,12 +209,12 @@ class _SosScreenState extends State<SosScreen> with WidgetsBindingObserver {
                 // Fixed top gap so the SOS button sits in the upper-middle
                 // of the screen and never shifts between phases.
                 const SizedBox(height: 40),
-                if (_errorMessage != null)
+                if (displayedError != null)
                   Padding(
                     key: const ValueKey('sos-error'),
                     padding: const EdgeInsets.only(bottom: 24),
                     child: Text(
-                      _errorMessage!,
+                      displayedError,
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                         color: SentriColors.caution,
@@ -436,7 +251,7 @@ class _SosScreenState extends State<SosScreen> with WidgetsBindingObserver {
                     child: FittedBox(
                       fit: BoxFit.contain,
                       child: HoldToConfirmSosButton(
-                        phase: _phase,
+                        phase: sos.phase,
                         onHoldComplete: _handleHoldComplete,
                         onHoldProgress: (p) {
                           // Only rebuild when the "is holding" state flips —
@@ -452,23 +267,23 @@ class _SosScreenState extends State<SosScreen> with WidgetsBindingObserver {
                   ),
                 const SizedBox(height: 16),
                 // ── Per-phase content below the button ──
-                if (_phase == SosButtonPhase.sending)
+                if (sos.phase == SosButtonPhase.sending)
                   _SendStatusRow(
-                    gps: _gpsStep,
-                    network: _networkStep,
-                    alert: _alertStep,
+                    gps: sos.gpsStep,
+                    network: sos.networkStep,
+                    alert: sos.alertStep,
                   )
-                else if (_phase == SosButtonPhase.sent &&
-                    _sosSentAt != null) ...[
+                else if (sos.phase == SosButtonPhase.sent &&
+                    sos.sosSentAt != null) ...[
                   _ConfirmedStatusCard(
-                    sentAt: _sosSentAt!,
+                    sentAt: sos.sosSentAt!,
                     dispatcherReviewing: incidentStore.dispatcherIsReviewing,
                     reviewingAt: incidentStore.dispatcherReviewingAt,
                   ),
                   const SizedBox(height: 20),
                   // Voice message is a pull, not a push — offered here,
                   // never navigated into automatically (Decision 31,
-                  // audit 1.4/R1). The recording screen itself is Pass 3.
+                  // audit 1.4/R1).
                   _VoiceMessageButton(onPressed: _openVoiceMessage),
                 ] else if (blockedPanelShowing)
                   const SizedBox.shrink()
@@ -626,45 +441,6 @@ class _GpsPill extends StatelessWidget {
   }
 }
 
-/// The shell's bottom navigation. Home is the only built destination in
-/// this pass; the other three tabs are present for shell consistency but
-/// have nowhere to go yet (tapping them does nothing).
-class _HomeBottomNav extends StatelessWidget {
-  const _HomeBottomNav();
-
-  @override
-  Widget build(BuildContext context) {
-    return BottomNavigationBar(
-      currentIndex: 0,
-      type: BottomNavigationBarType.fixed,
-      backgroundColor: SentriColors.background,
-      selectedItemColor: SentriColors.primaryRed,
-      unselectedItemColor: SentriColors.textMuted,
-      selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w600),
-      onTap: (_) {},
-      items: const [
-        BottomNavigationBarItem(
-          icon: Icon(Icons.home_outlined),
-          activeIcon: Icon(Icons.home),
-          label: 'Home',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.notifications_none),
-          label: 'Alerts',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.people_outline),
-          label: 'Contacts',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.settings_outlined),
-          label: 'Settings',
-        ),
-      ],
-    );
-  }
-}
-
 /// Screen 1: the location status line under the button when idle and not
 /// holding. Mock also shows a resolved place name ("Tagum City") — that
 /// needs reverse geocoding (a geocoding package + network) which this MVP
@@ -779,9 +555,9 @@ class _HoldingHintPanel extends StatelessWidget {
 /// a real step (audit 1.1/1.2) — GPS acquisition, server reachability, and
 /// the send request — never decoration.
 class _SendStatusRow extends StatelessWidget {
-  final _StepStatus gps;
-  final _StepStatus network;
-  final _StepStatus alert;
+  final StepStatus gps;
+  final StepStatus network;
+  final StepStatus alert;
 
   const _SendStatusRow({
     required this.gps,
@@ -829,7 +605,7 @@ class _SendStatusRow extends StatelessWidget {
 
 class _SendStatusColumn extends StatelessWidget {
   final String label;
-  final _StepStatus step;
+  final StepStatus step;
   final String working;
   final String ok;
   final String failed;
@@ -847,16 +623,16 @@ class _SendStatusColumn extends StatelessWidget {
     final Color dot;
     final String word;
     switch (step) {
-      case _StepStatus.idle:
+      case StepStatus.idle:
         dot = SentriColors.textMuted;
         word = 'Waiting';
-      case _StepStatus.working:
+      case StepStatus.working:
         dot = SentriColors.caution;
         word = working;
-      case _StepStatus.ok:
+      case StepStatus.ok:
         dot = SentriColors.success;
         word = ok;
-      case _StepStatus.failed:
+      case StepStatus.failed:
         dot = SentriColors.primaryRed;
         word = failed;
     }
@@ -880,7 +656,7 @@ class _SendStatusColumn extends StatelessWidget {
             Text(
               word,
               style: TextStyle(
-                color: step == _StepStatus.idle
+                color: step == StepStatus.idle
                     ? SentriColors.textMuted
                     : SentriColors.textPrimary,
                 fontSize: 12,
