@@ -27,6 +27,43 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
+/// The authenticated user's record as returned inside `POST /api/auth/login`'s
+/// success body (API_CONTRACTS.md). `phone_number` is deliberately absent —
+/// the login response does not carry it, and this MVP adds no separate
+/// profile fetch to obtain it.
+class SentriUser {
+  final String userId;
+  final String email;
+  final String fullName;
+  final String role;
+  final String status;
+
+  const SentriUser({
+    required this.userId,
+    required this.email,
+    required this.fullName,
+    required this.role,
+    required this.status,
+  });
+
+  factory SentriUser.fromJson(Map<String, dynamic> json) => SentriUser(
+    userId: json['user_id'] as String? ?? '',
+    email: json['email'] as String? ?? '',
+    fullName: json['full_name'] as String? ?? '',
+    role: json['role'] as String? ?? '',
+    status: json['status'] as String? ?? '',
+  );
+}
+
+/// `POST /api/auth/login`'s `200` body: a bearer token plus the
+/// authenticated user's record.
+class LoginResult {
+  final String token;
+  final SentriUser user;
+
+  const LoginResult({required this.token, required this.user});
+}
+
 /// Deliberately narrow — exactly the calls this MVP needs
 /// (docs/decisions/28, plus incident-status polling per decision 31), not
 /// a generic "everything" API service. Matches API_CONTRACTS.md's
@@ -72,9 +109,10 @@ class SentriApiClient {
     return data;
   }
 
-  /// Returns the bearer token on success. Does not store it — that's
-  /// AuthProvider's job, in memory only for this MVP.
-  Future<String> login({
+  /// Returns the bearer token and the authenticated user on success. Does
+  /// not store either — that's AuthProvider's job, in memory only for this
+  /// MVP.
+  Future<LoginResult> login({
     required String email,
     required String password,
   }) async {
@@ -90,7 +128,13 @@ class SentriApiClient {
       throw _errorFrom(response.statusCode, data);
     }
 
-    return data['token'] as String;
+    final user = data['user'];
+    return LoginResult(
+      token: data['token'] as String,
+      user: SentriUser.fromJson(
+        user is Map<String, dynamic> ? user : const {},
+      ),
+    );
   }
 
   /// Per docs/decisions/05-manual-sos-never-gated.md, this call has zero

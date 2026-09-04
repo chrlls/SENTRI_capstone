@@ -4,7 +4,10 @@ import 'package:provider/provider.dart';
 import 'controllers/sos_controller.dart';
 import 'providers/auth_provider.dart';
 import 'screens/login_screen.dart';
+import 'services/emergency_contacts_store.dart';
 import 'services/incident_status_store.dart';
+import 'services/notification_preferences_store.dart';
+import 'services/privacy_preferences_store.dart';
 import 'theme/sentri_colors.dart';
 
 void main() {
@@ -28,6 +31,18 @@ class SentriApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => IncidentStatusStore()),
+        // Session-only, in-memory emergency contacts (no persistence, no
+        // endpoint yet). Root-provided so the list outlives navigation
+        // between the Profile tab and the Emergency Contacts screen; it
+        // resets on app restart, on purpose.
+        ChangeNotifierProvider(create: (_) => EmergencyContactsStore()),
+        // Same non-persistence contract as EmergencyContactsStore — the
+        // notification-preferences and privacy-preferences endpoints
+        // don't exist yet. Root-provided so toggle state survives
+        // navigation between the Profile tab and each screen; resets on
+        // app restart.
+        ChangeNotifierProvider(create: (_) => NotificationPreferencesStore()),
+        ChangeNotifierProvider(create: (_) => PrivacyPreferencesStore()),
         // The manual-SOS submission flow, shared by the SOS screen and the
         // app shell's nav-bar SOS button (task Resolution D). Depends on
         // the two providers above; created once — its inputs are stable.

@@ -6,6 +6,7 @@ import 'package:mobile_app/controllers/sos_controller.dart';
 import 'package:mobile_app/main.dart';
 import 'package:mobile_app/providers/auth_provider.dart';
 import 'package:mobile_app/screens/app_shell.dart';
+import 'package:mobile_app/services/emergency_contacts_store.dart';
 import 'package:mobile_app/services/incident_status_store.dart';
 
 void main() {
@@ -25,6 +26,7 @@ void main() {
         providers: [
           ChangeNotifierProvider(create: (_) => AuthProvider()),
           ChangeNotifierProvider(create: (_) => IncidentStatusStore()),
+          ChangeNotifierProvider(create: (_) => EmergencyContactsStore()),
           ChangeNotifierProxyProvider2<AuthProvider, IncidentStatusStore,
               SosController>(
             create: (context) => SosController(
@@ -51,6 +53,16 @@ void main() {
     await tester.tap(find.text('Profile'));
     await tester.pump();
 
-    expect(find.text('You are signed in'), findsOneWidget);
+    // Profile tab content: the identity block (no user record when not
+    // logged in, so the fallback label and an unknown-status badge), the
+    // Emergency Contacts row with its empty-state subtitle, the two new
+    // preview rows, and Sign Out.
+    expect(find.text('Signed in'), findsOneWidget);
+    expect(find.text('Status unknown'), findsOneWidget);
+    expect(find.text('Emergency Contacts'), findsOneWidget);
+    expect(find.text('No contacts added yet'), findsOneWidget);
+    expect(find.text('Notifications'), findsOneWidget);
+    expect(find.text('Privacy & Security'), findsOneWidget);
+    expect(find.text('Sign Out'), findsOneWidget);
   });
 }

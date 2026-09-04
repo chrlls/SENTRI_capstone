@@ -14,10 +14,16 @@ class AuthProvider extends ChangeNotifier {
 
   AuthStatus _status = AuthStatus.unauthenticated;
   String? _token;
+  SentriUser? _user;
   String? _errorMessage;
 
   AuthStatus get status => _status;
   String? get token => _token;
+
+  /// The logged-in user's record from the login response — `full_name`,
+  /// `email`, `role`, `status` (no `phone_number`; the login body omits
+  /// it). `null` whenever [status] is not [AuthStatus.authenticated].
+  SentriUser? get user => _user;
   String? get errorMessage => _errorMessage;
   bool get isAuthenticated => _status == AuthStatus.authenticated;
   bool get isWorking => _status == AuthStatus.working;
@@ -66,8 +72,9 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final token = await apiClient.login(email: email, password: password);
-      _token = token;
+      final result = await apiClient.login(email: email, password: password);
+      _token = result.token;
+      _user = result.user;
       _status = AuthStatus.authenticated;
       notifyListeners();
       return true;
@@ -82,5 +89,19 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+  }
+
+  /// Local-only sign-out. Per Decision 28 the bearer token lives only in
+  /// memory, so signing out is purely clearing that state — there is no
+  /// token-revocation call to make. Anything that still holds the token
+  /// (e.g. `IncidentStatusStore`'s poll loop) must be stopped by the
+  /// caller *before* this runs, so no in-flight consumer is left with a
+  /// token that's about to be dropped.
+  void logout() {
+    _token = null;
+    _user = null;
+    _errorMessage = null;
+    _status = AuthStatus.unauthenticated;
+    notifyListeners();
   }
 }
