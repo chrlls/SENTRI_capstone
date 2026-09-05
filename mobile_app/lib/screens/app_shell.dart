@@ -37,8 +37,9 @@ class _AppShellState extends State<AppShell> {
   int _index = 0;
 
   void _openSosScreen() {
+    final backLabel = _index == 0 ? 'Home' : 'Profile';
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const SosScreen()),
+      MaterialPageRoute(builder: (_) => SosScreen(backLabel: backLabel)),
     );
   }
 

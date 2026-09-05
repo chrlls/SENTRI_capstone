@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
@@ -24,7 +27,13 @@ import 'voice_sos_screen.dart';
 /// is a deliberately separate, second incident and is now only reached
 /// when the civilian taps "Add a voice message" *after* a successful send.
 class SosScreen extends StatefulWidget {
-  const SosScreen({super.key});
+  /// Name of the tab this screen was pushed from ("Home" or "Profile"),
+  /// shown next to the back arrow in place of a static "SENTRI" wordmark
+  /// — this screen is always a pushed destination, never a tab itself, so
+  /// the header should read as a contextual back label, not a brand mark.
+  final String backLabel;
+
+  const SosScreen({super.key, required this.backLabel});
 
   @override
   State<SosScreen> createState() => _SosScreenState();
@@ -38,6 +47,14 @@ class _SosScreenState extends State<SosScreen> with WidgetsBindingObserver {
   _LocationStatus _locationStatus = _LocationStatus.checking;
   _LocationBlockReason? _blockReason;
   Position? _lastKnownPosition;
+
+  /// Reverse-geocoded from [_lastKnownPosition], e.g. "Tagum City" —
+  /// same best-effort `package:geocoding` pattern `home_screen.dart` uses
+  /// (fire-and-forget, never surfaced as an error): the coordinates/
+  /// accuracy already satisfy this row on their own, so a geocoding
+  /// failure just leaves this `null` rather than blocking or faking a
+  /// place name. Reset whenever the underlying position changes.
+  String? _cityName;
 
   /// Local surface for the one screen-specific error that isn't a
   /// submission failure: opening the voice-message flow without the
@@ -91,8 +108,18 @@ class _SosScreenState extends State<SosScreen> with WidgetsBindingObserver {
       return;
     }
 
+    // Only re-resolve the place name when the fix actually changed —
+    // `_refreshLocationStatus` re-runs on every app resume, and re-geocoding
+    // an unchanged position would just flash the city name blank and back.
+    final previous = _lastKnownPosition;
+    final positionChanged = lastKnown?.latitude != previous?.latitude ||
+        lastKnown?.longitude != previous?.longitude;
+
     setState(() {
       _lastKnownPosition = lastKnown;
+      if (positionChanged) {
+        _cityName = null;
+      }
 
       if (!serviceEnabled) {
         _locationStatus = _LocationStatus.blocked;
@@ -108,6 +135,35 @@ class _SosScreenState extends State<SosScreen> with WidgetsBindingObserver {
         _blockReason = null;
       }
     });
+
+    if (positionChanged && lastKnown != null) {
+      // Fire-and-forget, same as the Home tab's location card: the
+      // coordinates/accuracy already satisfy this row, so the city name
+      // fills in when it arrives rather than delaying anything.
+      unawaited(_reverseGeocode(lastKnown.latitude, lastKnown.longitude));
+    }
+  }
+
+  /// Best-effort only — mirrors `home_screen.dart`'s `_reverseGeocode`
+  /// exactly. A geocoding failure (offline, no result, plugin issue) must
+  /// never surface as an error here: the coordinates this row already
+  /// shows are correct and sufficient on their own.
+  Future<void> _reverseGeocode(double latitude, double longitude) async {
+    try {
+      final placemarks = await Geocoding().placemarkFromCoordinates(latitude, longitude);
+      if (!mounted || placemarks.isEmpty) return;
+      final placemark = placemarks.first;
+      final city = [
+        placemark.locality,
+        placemark.subAdministrativeArea,
+        placemark.administrativeArea,
+      ].firstWhere((candidate) => (candidate ?? '').trim().isNotEmpty, orElse: () => null);
+      if (city == null) return;
+      setState(() => _cityName = city);
+    } catch (_) {
+      // No connectivity, no geocoder on this device, no result — the row
+      // already reads fine on coordinates/accuracy alone.
+    }
   }
 
   Future<void> _handleHoldComplete() async {
@@ -176,21 +232,17 @@ class _SosScreenState extends State<SosScreen> with WidgetsBindingObserver {
     final holding =
         sos.phase == SosButtonPhase.idle && _screenHoldProgress > 0.001;
     final blockedPanelShowing = _locationStatus == _LocationStatus.blocked &&
-        sos.phase != SosButtonPhase.sent;
+        sos.phase != SosButtonPhase.sent &&
+        sos.phase != SosButtonPhase.resolvedAcknowledgement;
 
     return Scaffold(
       backgroundColor: SentriColors.background,
       appBar: AppBar(
-        title: const Text('SENTRI'),
+        title: Text(widget.backLabel),
+        centerTitle: false,
         backgroundColor: SentriColors.background,
         foregroundColor: SentriColors.textPrimary,
         elevation: 0,
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: Center(child: _GpsPill(status: _locationStatus)),
-          ),
-        ],
       ),
       // No bottom navigation here: the app shell owns navigation now, and
       // the SOS screen is a pushed destination reached by tapping the
@@ -223,6 +275,27 @@ class _SosScreenState extends State<SosScreen> with WidgetsBindingObserver {
                       ),
                     ),
                   ),
+                if (sos.phase == SosButtonPhase.idle) ...[
+                  const Text(
+                    'Need help?',
+                    style: TextStyle(
+                      color: SentriColors.textPrimary,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Press and hold the button below to send an emergency alert.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: SentriColors.textMuted,
+                      fontSize: 14,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 28),
+                ],
                 if (blockedPanelShowing)
                   _LocationBlockedPanel(
                     reason: _blockReason!,
@@ -253,6 +326,13 @@ class _SosScreenState extends State<SosScreen> with WidgetsBindingObserver {
                       fit: BoxFit.contain,
                       child: HoldToConfirmSosButton(
                         phase: sos.phase,
+                        idleLabel: 'SOS',
+                        idleLabelStyle: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 54,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.5,
+                        ),
                         onHoldComplete: _handleHoldComplete,
                         onHoldProgress: (p) {
                           // Only rebuild when the "is holding" state flips —
@@ -286,14 +366,24 @@ class _SosScreenState extends State<SosScreen> with WidgetsBindingObserver {
                   // never navigated into automatically (Decision 31,
                   // audit 1.4/R1).
                   _VoiceMessageButton(onPressed: _openVoiceMessage),
-                ] else if (blockedPanelShowing)
+                ] else if (sos.phase == SosButtonPhase.resolvedAcknowledgement)
+                  _TerminalAcknowledgementCard(status: sos.terminalStatus)
+                else if (blockedPanelShowing)
                   const SizedBox.shrink()
                 else if (holding)
                   const _HoldingHintPanel()
                 else
-                  _LocationReadyRow(
-                    status: _locationStatus,
-                    position: _lastKnownPosition,
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const _HelpReassuranceRow(),
+                      const SizedBox(height: 20),
+                      _LocationReadyRow(
+                        status: _locationStatus,
+                        position: _lastKnownPosition,
+                        cityName: _cityName,
+                      ),
+                    ],
                   ),
                 const Spacer(),
               ],
@@ -396,61 +486,18 @@ class _Dot extends StatelessWidget {
   }
 }
 
-/// Top-right of the shell: a dot + "GPS", green when a fix is ready, amber
-/// while acquiring / not yet requested, red when location is blocked. This
-/// is one of the places audit item 1.2 gets addressed — the three
-/// not-ready states are no longer visually identical.
-class _GpsPill extends StatelessWidget {
-  final _LocationStatus status;
-
-  const _GpsPill({required this.status});
-
-  @override
-  Widget build(BuildContext context) {
-    final Color dot;
-    switch (status) {
-      case _LocationStatus.ready:
-        dot = SentriColors.success;
-      case _LocationStatus.checking:
-      case _LocationStatus.notYetRequested:
-        dot = SentriColors.caution;
-      case _LocationStatus.blocked:
-        dot = SentriColors.primaryRed;
-    }
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: SentriColors.surfaceMuted,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _Dot(dot, size: 7),
-          const SizedBox(width: 6),
-          const Text(
-            'GPS',
-            style: TextStyle(
-              color: SentriColors.textMuted,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 /// Screen 1: the location status line under the button when idle and not
-/// holding. Mock also shows a resolved place name ("Tagum City") — that
-/// needs reverse geocoding (a geocoding package + network) which this MVP
-/// doesn't have, so it's intentionally omitted rather than faked.
+/// holding. When [cityName] has resolved (same best-effort reverse-geocode
+/// `home_screen.dart`'s location card uses), it leads in place of the
+/// generic "Location ready" label; the accuracy line stays either way, and
+/// a `null` city (still resolving, or geocoding failed) falls back to the
+/// generic label rather than showing nothing or a fake place name.
 class _LocationReadyRow extends StatelessWidget {
   final _LocationStatus status;
   final Position? position;
+  final String? cityName;
 
-  const _LocationReadyRow({required this.status, this.position});
+  const _LocationReadyRow({required this.status, this.position, this.cityName});
 
   @override
   Widget build(BuildContext context) {
@@ -460,7 +507,7 @@ class _LocationReadyRow extends StatelessWidget {
     switch (status) {
       case _LocationStatus.ready:
         dot = SentriColors.success;
-        label = 'Location ready';
+        label = cityName ?? 'Location ready';
         final acc = position?.accuracy;
         if (acc != null && acc > 0) sub = 'Accuracy: ±${acc.round()} m';
       case _LocationStatus.checking:
@@ -505,49 +552,39 @@ class _LocationReadyRow extends StatelessWidget {
   }
 }
 
-/// Screen 2: shown below the button while a hold is in progress.
+/// Screen 2: shown below the button while a hold is in progress. Only
+/// "Release to cancel" — the reassurance line ("help will be sent...")
+/// now lives once on the idle screen ([_HelpReassuranceRow]), read
+/// moments earlier; repeating a near-identical sentence again here as
+/// the hold starts would just be the same message twice in a few
+/// seconds, not new information.
 class _HoldingHintPanel extends StatelessWidget {
   const _HoldingHintPanel();
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const Text(
-          'Release to cancel',
-          style: TextStyle(color: SentriColors.textMuted, fontSize: 13),
-        ),
-        const SizedBox(height: 14),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          decoration: BoxDecoration(
-            color: SentriColors.surfaceMuted,
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: const Row(
-            children: [
-              Icon(
-                LucideIcons.shield,
-                color: SentriColors.textMuted,
-                size: 20,
-              ),
-              SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  "We'll notify responders and share your location.",
-                  style: TextStyle(
-                    color: SentriColors.textMuted,
-                    fontSize: 13,
-                    height: 1.3,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
+    return const Text(
+      'Release to cancel',
+      style: TextStyle(color: SentriColors.textMuted, fontSize: 13),
+    );
+  }
+}
+
+/// The idle screen's standing reassurance line, shown only while at rest
+/// (not holding, not location-blocked). Deliberately the only place this
+/// message renders (see [_HoldingHintPanel]) and plain text only — no
+/// icon, so it doesn't compete with the shield glyph already used
+/// elsewhere on this screen (`_LocationBlockedPanel`'s map-off icon,
+/// `_ConfirmedStatusCard`'s status icons) for meaning.
+class _HelpReassuranceRow extends StatelessWidget {
+  const _HelpReassuranceRow();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Text(
+      'Help will be sent to nearby responders and authorities.',
+      textAlign: TextAlign.center,
+      style: TextStyle(color: SentriColors.textMuted, fontSize: 13),
     );
   }
 }
@@ -773,6 +810,79 @@ class _StatusRow extends StatelessWidget {
             style: const TextStyle(color: SentriColors.textMuted, fontSize: 13),
           ),
       ],
+    );
+  }
+}
+
+/// Shown for [SosController.terminalAcknowledgementDuration] once the
+/// tracked incident reaches a terminal backend status, replacing the
+/// checklist card while [SosController] counts down to an automatic
+/// reset back to idle — never a "Done" button, since the civilian may
+/// not be looking at the screen at this exact moment. States the actual
+/// terminal outcome explicitly: `false_alarm`/`cancelled` must never read
+/// as "resolved", they're different real-world outcomes.
+class _TerminalAcknowledgementCard extends StatelessWidget {
+  final IncidentLifecycle? status;
+
+  const _TerminalAcknowledgementCard({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final IconData icon;
+    final Color iconColor;
+    final String label;
+    switch (status) {
+      case IncidentLifecycle.resolved:
+        icon = LucideIcons.circleCheck;
+        iconColor = SentriColors.success;
+        label = 'Incident resolved';
+      case IncidentLifecycle.falseAlarm:
+        icon = LucideIcons.circleAlert;
+        iconColor = SentriColors.textMuted;
+        label = 'Alert closed — marked as a false alarm';
+      case IncidentLifecycle.cancelled:
+        icon = LucideIcons.circleAlert;
+        iconColor = SentriColors.textMuted;
+        label = 'Alert cancelled';
+      // Unreachable in practice — this card only renders while
+      // SosController.phase is resolvedAcknowledgement, which it only
+      // enters after observing one of the three cases above — but the
+      // enum also has non-terminal values, so the switch still needs a
+      // default to be exhaustive.
+      default:
+        icon = LucideIcons.circleCheck;
+        iconColor = SentriColors.textMuted;
+        label = 'Alert closed';
+    }
+    return Semantics(
+      liveRegion: true,
+      container: true,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+        decoration: BoxDecoration(
+          color: SentriColors.surface,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: iconColor, size: 20),
+            const SizedBox(width: 10),
+            Flexible(
+              child: Text(
+                label,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: SentriColors.textPrimary,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

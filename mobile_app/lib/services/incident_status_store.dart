@@ -32,7 +32,11 @@ enum IncidentLifecycle {
   unknown,
 }
 
-IncidentLifecycle _parseLifecycle(String? raw) {
+/// Public so any screen reading a raw `status` string from `API_CONTRACTS.md`
+/// responses (e.g. a history list built from `GET /api/incidents`, not just
+/// this store's own polling) shares one parser rather than re-deriving the
+/// same 7-value mapping a second time.
+IncidentLifecycle parseIncidentLifecycle(String? raw) {
   switch (raw) {
     case 'detected':
       return IncidentLifecycle.detected;
@@ -53,7 +57,9 @@ IncidentLifecycle _parseLifecycle(String? raw) {
   }
 }
 
-bool _isTerminal(IncidentLifecycle l) =>
+/// Public so [SosController] can recognise a terminal status without this
+/// store duplicating the enum's terminal set a second time elsewhere.
+bool isTerminalIncidentStatus(IncidentLifecycle l) =>
     l == IncidentLifecycle.resolved ||
     l == IncidentLifecycle.falseAlarm ||
     l == IncidentLifecycle.cancelled;
@@ -104,7 +110,8 @@ class IncidentStatusStore extends ChangeNotifier {
   /// sign-out), so UI asking "is anything actually still happening right
   /// now" — e.g. the Home tab's safety-status card — should read this
   /// instead of `isTracking`.
-  bool get hasActiveIncident => _incidentId != null && !_isTerminal(_status);
+  bool get hasActiveIncident =>
+      _incidentId != null && !isTerminalIncidentStatus(_status);
   DateTime? get lastPolledAt => _lastPolledAt;
   Object? get lastError => _lastError;
 
@@ -151,6 +158,14 @@ class IncidentStatusStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Triggers exactly one poll immediately, bypassing [pollInterval] —
+  /// exists only so tests can advance the lifecycle deterministically
+  /// instead of waiting on (or fast-forwarding) a real 5-second timer.
+  /// Production code must never call this; polling is driven by [_timer]
+  /// alone.
+  @visibleForTesting
+  Future<void> debugPollOnceForTest() => _poll();
+
   Future<void> _poll() async {
     final id = _incidentId;
     final token = _token;
@@ -159,11 +174,18 @@ class IncidentStatusStore extends ChangeNotifier {
     }
     try {
       final data = await _apiClient.getIncident(token: token, incidentId: id);
+      // `startTracking` can retarget `_incidentId`/`_token` while this
+      // request was in flight (a new SOS fired before this poll's response
+      // landed) — a late write here would silently resurrect the old
+      // incident's status under the new tracked id. Discard it instead.
+      if (_incidentId != id) {
+        return;
+      }
       _lastPolledAt = DateTime.now();
       final hadError = _lastError != null;
       _lastError = null;
 
-      final next = _parseLifecycle(data['status'] as String?);
+      final next = parseIncidentLifecycle(data['status'] as String?);
       final statusChanged = next != _status;
       _status = next;
 
@@ -171,7 +193,7 @@ class IncidentStatusStore extends ChangeNotifier {
         _dispatcherReviewingAt = DateTime.now();
       }
 
-      if (_isTerminal(next)) {
+      if (isTerminalIncidentStatus(next)) {
         _timer?.cancel();
         _timer = null;
       }
@@ -180,6 +202,10 @@ class IncidentStatusStore extends ChangeNotifier {
         notifyListeners();
       }
     } on ApiException catch (e) {
+      // Same staleness guard as above, applied to the error path too.
+      if (_incidentId != id) {
+        return;
+      }
       // 401 (token expired) or 404 (incident gone, or no longer visible).
       // Keep the last known status on screen; surface the error for
       // debugging but don't churn the UI. Polling continues — a transient
@@ -192,6 +218,9 @@ class IncidentStatusStore extends ChangeNotifier {
         notifyListeners();
       }
     } catch (e) {
+      if (_incidentId != id) {
+        return;
+      }
       // Network/socket/timeout — transient. Retry next tick, keep the last
       // known status.
       final wasClean = _lastError == null;

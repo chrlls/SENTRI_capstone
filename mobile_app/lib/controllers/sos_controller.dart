@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 
@@ -44,10 +46,25 @@ enum StepStatus { idle, working, ok, failed }
 /// [HoldToConfirmSosButton]; this is only invoked once that gesture has
 /// already completed.
 class SosController extends ChangeNotifier {
-  SosController(this._apiClient, this._statusStore);
+  SosController(this._apiClient, this._statusStore) {
+    // IncidentStatusStore stays the sole source of truth for backend
+    // incident status (per its own class doc) — this controller only
+    // *reacts* to it to drive the SOS-interaction phase, it never keeps
+    // an independent copy of incident status that could drift from it.
+    _statusStore.addListener(_onIncidentStatusChanged);
+  }
 
   final SentriApiClient _apiClient;
   final IncidentStatusStore _statusStore;
+
+  /// How long the terminal-acknowledgement phase stays on screen before
+  /// auto-returning to idle — long enough to read a one-line message,
+  /// short enough not to leave the screen stuck for someone who has
+  /// already put the phone down (Decision 31's whole rationale for
+  /// keeping everything after "sent" low-friction).
+  static const Duration terminalAcknowledgementDuration = Duration(
+    seconds: 3,
+  );
 
   SosButtonPhase _phase = SosButtonPhase.idle;
   String? _errorMessage;
@@ -59,11 +76,20 @@ class SosController extends ChangeNotifier {
   double? _lastSosLongitude;
   bool _inFlight = false;
 
+  /// Which terminal status ended the tracked incident, captured the
+  /// instant [_onIncidentStatusChanged] detects one — read by the screen
+  /// to render the correct one of "Incident resolved" / "Alert closed" /
+  /// "Alert cancelled" during [SosButtonPhase.resolvedAcknowledgement].
+  /// `null` outside that phase.
+  IncidentLifecycle? _terminalStatus;
+  Timer? _terminalAckTimer;
+
   SosButtonPhase get phase => _phase;
   String? get errorMessage => _errorMessage;
   StepStatus get gpsStep => _gpsStep;
   StepStatus get networkStep => _networkStep;
   StepStatus get alertStep => _alertStep;
+  IncidentLifecycle? get terminalStatus => _terminalStatus;
 
   /// Non-null once a manual SOS has succeeded this session. Drives the SOS
   /// screen's persistent "SOS sent" status card; nothing clears it
@@ -211,5 +237,54 @@ class SosController extends ChangeNotifier {
           'Couldn\'t reach the server. Check your connection and try again.';
     }
     notifyListeners();
+  }
+
+  /// [IncidentStatusStore] listener — the only place this controller reads
+  /// backend incident status, and only to decide *when* to move the SOS
+  /// phase, never to store a second copy of that status. Fires on every
+  /// poll tick, so most calls are a no-op via the phase guard below.
+  void _onIncidentStatusChanged() {
+    if (_phase != SosButtonPhase.sent) {
+      // Only the post-send confirmation phase is waiting on this. In
+      // particular, once `resolvedAcknowledgement` has already started,
+      // further store notifications (e.g. `stopTracking`'s own
+      // `notifyListeners`) must not restart the countdown or re-fire it.
+      return;
+    }
+    final status = _statusStore.status;
+    if (!isTerminalIncidentStatus(status)) {
+      return;
+    }
+    _terminalAckTimer?.cancel();
+    _phase = SosButtonPhase.resolvedAcknowledgement;
+    _terminalStatus = status;
+    notifyListeners();
+    _terminalAckTimer = Timer(
+      terminalAcknowledgementDuration,
+      _completeTerminalAcknowledgement,
+    );
+  }
+
+  /// Ends the terminal-acknowledgement phase automatically — never a user
+  /// "Done" tap (the civilian may already have put the phone down).
+  /// Clears the tracked incident *here*, not the moment the terminal
+  /// status was first observed, so the acknowledgement text has something
+  /// to read from for its full on-screen duration.
+  void _completeTerminalAcknowledgement() {
+    _terminalAckTimer = null;
+    _phase = SosButtonPhase.idle;
+    _terminalStatus = null;
+    _sosSentAt = null;
+    _lastSosLatitude = null;
+    _lastSosLongitude = null;
+    _statusStore.stopTracking();
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _terminalAckTimer?.cancel();
+    _statusStore.removeListener(_onIncidentStatusChanged);
+    super.dispose();
   }
 }

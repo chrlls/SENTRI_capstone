@@ -12,7 +12,12 @@ import 'sos_particle_field.dart';
 /// gesture itself completes — everything before completion (idle, the
 /// hold progress itself) is this widget's own internal state, since the
 /// parent has no reason to know about in-progress touch state.
-enum SosButtonPhase { idle, sending, sent }
+/// [resolvedAcknowledgement]: the tracked incident reached a terminal
+/// backend status (resolved / false_alarm / cancelled) while this screen
+/// was showing `sent`. Visually a continuation of `sent` (still the
+/// confirmed green disc, still transmitting) — [SosController] auto-drives
+/// this back to `idle` after a few seconds; nothing in this widget times it.
+enum SosButtonPhase { idle, sending, sent, resolvedAcknowledgement }
 
 const _diameter = 220.0;
 const _discRadius = _diameter / 2;
@@ -228,7 +233,8 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
 
   bool get _isTransmitting =>
       widget.phase == SosButtonPhase.sending ||
-      widget.phase == SosButtonPhase.sent;
+      widget.phase == SosButtonPhase.sent ||
+      widget.phase == SosButtonPhase.resolvedAcknowledgement;
 
   /// Runs every frame while [_holdWatch] is running. Reads real elapsed
   /// time (not an animation value), fires the escalating detent haptics,
@@ -458,7 +464,9 @@ class _HoldToConfirmSosButtonState extends State<HoldToConfirmSosButton>
           builder: (context, _) {
             final phase = widget.phase;
             final sentBurst = _sentBurstController.value;
-            final confirmProgress = phase == SosButtonPhase.sent
+            final confirmed = phase == SosButtonPhase.sent ||
+                phase == SosButtonPhase.resolvedAcknowledgement;
+            final confirmProgress = confirmed
                 ? Curves.easeInOut.transform((sentBurst / 0.6).clamp(0.0, 1.0))
                 : 0.0;
 
@@ -638,6 +646,32 @@ class _ButtonLabel extends StatelessWidget {
                 ],
               ),
             ),
+          ),
+        );
+      case SosButtonPhase.resolvedAcknowledgement:
+        // The specific terminal wording (resolved / false alarm /
+        // cancelled) renders in the screen's card below the button, not
+        // here — this label stays generic since it's shared across all
+        // three terminal outcomes. Static, not tied to `sentBurst`: it's
+        // already fully settled by the time this phase is reached.
+        return const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(LucideIcons.check, color: Colors.white, size: 26),
+              SizedBox(height: 6),
+              Text(
+                'ALERT CLOSED',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.0,
+                ),
+              ),
+            ],
           ),
         );
       case SosButtonPhase.idle:

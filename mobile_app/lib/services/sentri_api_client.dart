@@ -244,6 +244,34 @@ class SentriApiClient {
     return data;
   }
 
+  /// Per API_CONTRACTS.md `GET /api/incidents` — the authenticated user's
+  /// own incidents (civilian scoping enforced server-side by
+  /// `ListIncidentsForUser`, not filtered client-side), newest first.
+  /// Lighter shape than [getIncident]: no AI classification/history/
+  /// notifications, but includes `barangay_name` already resolved
+  /// server-side — callers should prefer that over re-deriving a place
+  /// name client-side.
+  Future<List<Map<String, dynamic>>> listIncidents({
+    required String token,
+  }) async {
+    final response = await _client.get(
+      Uri.parse('$baseUrl/api/incidents'),
+      headers: {..._jsonHeaders(), 'Authorization': 'Bearer $token'},
+    );
+
+    final data = _decode(response.body);
+
+    if (response.statusCode != 200) {
+      throw _errorFrom(response.statusCode, data);
+    }
+
+    final incidents = data['incidents'];
+    if (incidents is! List) {
+      return [];
+    }
+    return incidents.whereType<Map<String, dynamic>>().toList();
+  }
+
   Map<String, String> _jsonHeaders() => {
     'Content-Type': 'application/json',
     'Accept': 'application/json',

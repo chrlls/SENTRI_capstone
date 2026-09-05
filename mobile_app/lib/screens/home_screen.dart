@@ -11,6 +11,7 @@ import '../services/incident_status_store.dart';
 import '../services/location_service.dart';
 import '../theme/sentri_colors.dart';
 import '../widgets/floating_nav_bar.dart';
+import 'alert_history_screen.dart';
 import 'notifications_screen.dart';
 import 'sos_screen.dart';
 
@@ -128,7 +129,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _openSosStatus() {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const SosScreen()),
+      MaterialPageRoute(builder: (_) => const SosScreen(backLabel: 'Home')),
+    );
+  }
+
+  void _openAlertHistory() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const AlertHistoryScreen()),
     );
   }
 
@@ -213,6 +220,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   sosSentAt: sos.sosSentAt,
                   lastStatus: incidentStore.status,
                   onTap: _openSosStatus,
+                  onSeeAll: _openAlertHistory,
                 ),
               ],
             ],
@@ -536,21 +544,25 @@ class _LocationCard extends StatelessWidget {
   }
 }
 
-/// Reads [SosController.sosSentAt] rather than a fake multi-item feed —
-/// this app has no incident-history endpoint yet, so the only "recent
-/// activity" it can honestly show is the one SOS this session actually
-/// sent, if any. Hidden entirely while an incident is still active
-/// (`HomeScreen` skips this section then) to avoid repeating the safety
-/// card above.
+/// Reads [SosController.sosSentAt] for its one-line preview — an
+/// in-memory, session-only signal (Decision 28's scope cut), not a fetch
+/// from the real incident-history endpoint. [onSeeAll] opens
+/// [AlertHistoryScreen] instead, which reads the persisted list via
+/// `GET /api/incidents` and survives an app restart; this section stays a
+/// lightweight "just happened" preview, not a duplicate of that screen.
+/// Hidden entirely while an incident is still active (`HomeScreen` skips
+/// this section then) to avoid repeating the safety card above.
 class _RecentActivitySection extends StatelessWidget {
   final DateTime? sosSentAt;
   final IncidentLifecycle lastStatus;
   final VoidCallback onTap;
+  final VoidCallback onSeeAll;
 
   const _RecentActivitySection({
     required this.sosSentAt,
     required this.lastStatus,
     required this.onTap,
+    required this.onSeeAll,
   });
 
   String get _statusLabel => switch (lastStatus) {
@@ -565,11 +577,28 @@ class _RecentActivitySection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Recent activity',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: SentriColors.textPrimary),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text(
+              'Recent activity',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: SentriColors.textPrimary),
+            ),
+            TextButton(
+              onPressed: onSeeAll,
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                minimumSize: const Size(44, 44),
+                foregroundColor: SentriColors.primaryRed,
+              ),
+              child: const Text(
+                'See all',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 4),
         if (sosSentAt == null) const _EmptyActivityState() else _buildActivityRow(),
       ],
     );
