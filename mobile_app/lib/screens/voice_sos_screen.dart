@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
@@ -162,7 +163,7 @@ class _VoiceSosScreenState extends State<VoiceSosScreen> {
               const Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.check_circle, color: SentriColors.success, size: 20),
+                  Icon(LucideIcons.circleCheck, color: SentriColors.success, size: 20),
                   SizedBox(width: 8),
                   Flexible(
                     child: Text(
@@ -246,7 +247,7 @@ class _IntroContent extends StatelessWidget {
               backgroundColor: SentriColors.sosAlarm,
               shape: const CircleBorder(),
             ),
-            child: const Icon(Icons.mic, color: Colors.white, size: 36),
+            child: const Icon(LucideIcons.mic, color: Colors.white, size: 36),
           ),
         ),
         const SizedBox(height: 28),
@@ -270,7 +271,7 @@ class _MicBlockedContent extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Icon(Icons.mic_off_outlined, color: SentriColors.textMuted, size: 40),
+        const Icon(LucideIcons.micOff, color: SentriColors.textMuted, size: 40),
         const SizedBox(height: 16),
         const Text(
           'SENTRI needs microphone access to record a voice message. Your SOS was already sent either way.',
@@ -313,7 +314,18 @@ class _RecordingContent extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Icon(Icons.fiber_manual_record, color: SentriColors.sosAlarm, size: 20),
+        // A plain dot rather than a Material icon substitute: this is the
+        // low-key active-recording indicator SENTRI_DESIGN_SYSTEM_V1.1.md
+        // §12 (Voice Message → Recording) describes literally — no icon
+        // family, Lucide included, ships a plain filled-circle glyph.
+        Container(
+          width: 12,
+          height: 12,
+          decoration: const BoxDecoration(
+            color: SentriColors.sosAlarm,
+            shape: BoxShape.circle,
+          ),
+        ),
         const SizedBox(height: 12),
         Text(_label, style: const TextStyle(color: SentriColors.textPrimary, fontSize: 28, fontWeight: FontWeight.w300)),
         const SizedBox(height: 28),
@@ -327,7 +339,7 @@ class _RecordingContent extends StatelessWidget {
               foregroundColor: SentriColors.textPrimary,
               shape: const CircleBorder(),
             ),
-            child: const Icon(Icons.stop, size: 32),
+            child: const Icon(LucideIcons.square, size: 32),
           ),
         ),
       ],
@@ -346,7 +358,7 @@ class _ResultContent extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Icon(Icons.check_circle, color: SentriColors.success, size: 56),
+        const Icon(LucideIcons.circleCheck, color: SentriColors.success, size: 56),
         const SizedBox(height: 16),
         Text(message, style: const TextStyle(color: SentriColors.textPrimary, fontSize: 17)),
         const SizedBox(height: 28),

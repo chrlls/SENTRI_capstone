@@ -7,10 +7,26 @@ import 'package:http_parser/http_parser.dart';
 /// inside the emulator refers to the emulator itself, not the host machine
 /// running the Laravel dev server (`php artisan serve`). `10.0.2.2` is the
 /// emulator's documented alias for the host loopback interface (real
-/// Android emulator networking behavior, not a typo). A real device or
-/// production build would need a real reachable host — out of scope for
-/// this MVP (docs/decisions/28-flutter-manual-sos-mvp.md).
-const String kApiBaseUrl = 'http://10.0.2.2:8000';
+/// Android emulator networking behavior, not a typo) — kept as the default
+/// so the existing emulator workflow needs no extra flags.
+///
+/// A physical device needs the dev machine's actual LAN IP instead, since
+/// `10.0.2.2` resolves to nothing outside the emulator. Override with:
+/// ```
+/// flutter run --dart-define=API_BASE_URL=http://LAN_IP:8000
+/// ```
+/// Find `LAN_IP` via `ipconfig` (Windows, "IPv4 Address") or
+/// `ifconfig`/`ip addr` (macOS/Linux). The phone and dev machine must be on
+/// the same network, the Laravel server must be started with
+/// `--host=0.0.0.0` (its default `127.0.0.1` only accepts connections from
+/// the same machine), and the dev machine's firewall must allow inbound
+/// connections on the port. A production build would need a real
+/// reachable host configured the same way — out of scope for this MVP
+/// (docs/decisions/28-flutter-manual-sos-mvp.md).
+const String kApiBaseUrl = String.fromEnvironment(
+  'API_BASE_URL',
+  defaultValue: 'http://10.0.2.2:8000',
+);
 
 /// Thrown for any non-2xx response. Carries the real message the backend
 /// returned (per API_CONTRACTS.md) so callers never have to invent their

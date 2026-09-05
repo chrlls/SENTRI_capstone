@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
 
 import '../controllers/sos_controller.dart';
@@ -331,7 +332,7 @@ class _LocationBlockedPanel extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         const Icon(
-          Icons.location_off_outlined,
+          LucideIcons.mapPinOff,
           color: SentriColors.textMuted,
           size: 40,
         ),
@@ -528,7 +529,7 @@ class _HoldingHintPanel extends StatelessWidget {
           child: const Row(
             children: [
               Icon(
-                Icons.shield_outlined,
+                LucideIcons.shield,
                 color: SentriColors.textMuted,
                 size: 20,
               ),
@@ -702,14 +703,14 @@ class _ConfirmedStatusCard extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             _StatusRow(
-              icon: Icons.check_circle,
+              icon: LucideIcons.circleCheck,
               iconColor: SentriColors.success,
               label: 'Alert sent',
               trailing: sentTime,
             ),
             const SizedBox(height: 12),
             _StatusRow(
-              icon: Icons.check_circle,
+              icon: LucideIcons.circleCheck,
               iconColor: SentriColors.success,
               label: 'Location shared',
               trailing: sentTime,
@@ -717,7 +718,7 @@ class _ConfirmedStatusCard extends StatelessWidget {
             const SizedBox(height: 12),
             if (dispatcherReviewing)
               _StatusRow(
-                icon: Icons.assignment_ind_outlined,
+                icon: LucideIcons.userCheck,
                 iconColor: SentriColors.textPrimary,
                 label: 'Dispatcher reviewing',
                 trailing: reviewingAt != null
@@ -726,7 +727,7 @@ class _ConfirmedStatusCard extends StatelessWidget {
               )
             else
               const _StatusRow(
-                icon: Icons.schedule,
+                icon: LucideIcons.clock,
                 iconColor: SentriColors.textMuted,
                 label: 'Waiting for dispatcher',
                 trailing: 'Pending',
@@ -790,7 +791,7 @@ class _VoiceMessageButton extends StatelessWidget {
       width: double.infinity,
       child: OutlinedButton.icon(
         onPressed: onPressed,
-        icon: const Icon(Icons.mic_none, size: 20),
+        icon: const Icon(LucideIcons.mic, size: 20),
         label: const Text('Add a voice message'),
         style: OutlinedButton.styleFrom(
           foregroundColor: SentriColors.textPrimary,

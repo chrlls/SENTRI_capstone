@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../theme/sentri_colors.dart';
 import 'hold_to_confirm_sos_button.dart';
@@ -209,8 +210,7 @@ class _FloatingNavBarState extends State<FloatingNavBar> {
                   children: [
                     Expanded(
                       child: _NavTab(
-                        icon: Icons.home_outlined,
-                        activeIcon: Icons.home,
+                        icon: LucideIcons.home,
                         label: 'Home',
                         selected: widget.currentIndex == 0,
                         onTap: () => widget.onSelect(0),
@@ -219,8 +219,7 @@ class _FloatingNavBarState extends State<FloatingNavBar> {
                     const SizedBox(width: _sosDiscDiameter + 60),
                     Expanded(
                       child: _NavTab(
-                        icon: Icons.person_outline,
-                        activeIcon: Icons.person,
+                        icon: LucideIcons.user,
                         label: 'Profile',
                         selected: widget.currentIndex == 1,
                         onTap: () => widget.onSelect(1),
@@ -305,14 +304,12 @@ class _FloatingNavBarState extends State<FloatingNavBar> {
 
 class _NavTab extends StatelessWidget {
   final IconData icon;
-  final IconData activeIcon;
   final String label;
   final bool selected;
   final VoidCallback onTap;
 
   const _NavTab({
     required this.icon,
-    required this.activeIcon,
     required this.label,
     required this.selected,
     required this.onTap,
@@ -333,7 +330,10 @@ class _NavTab extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(selected ? activeIcon : icon, size: 23, color: color),
+            // Lucide ships one weight, no filled/outline twin per icon like
+            // Material's `_outlined` pair — selection is communicated by
+            // color and the label's font-weight bump below instead.
+            Icon(icon, size: 23, color: color),
             const SizedBox(height: 3),
             Text(
               label,

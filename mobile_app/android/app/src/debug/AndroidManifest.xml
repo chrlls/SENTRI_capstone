@@ -4,4 +4,10 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Android 9+ (API 28+) blocks plain HTTP by default. The dev Laravel
+         server (sentri_api_client.dart's kApiBaseUrl) is plain HTTP, not
+         HTTPS, so debug builds need cleartext traffic explicitly allowed —
+         debug-only via this manifest, never merged into the release build,
+         which should talk to a real HTTPS backend anyway. -->
+    <application android:usesCleartextTraffic="true"/>
 </manifest>

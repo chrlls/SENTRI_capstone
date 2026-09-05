@@ -13,15 +13,30 @@ class SentriColors {
   const SentriColors._();
 
   /// The one accent color across the app — SOS button solid states,
-  /// primary CTA buttons, and any other primary-action accent.
-  static const Color primaryRed = Color(0xFFEB1B1D);
+  /// primary CTA buttons, and any other primary-action accent. Matches
+  /// SENTRI_DESIGN_SYSTEM_V1.1.md §2.2 `sentri-red` — corrected from the
+  /// brighter #EB1B1D this shipped with, which had drifted from the doc.
+  static const Color primaryRed = Color(0xFFD92D20);
 
   static const Color background = Color(0xFFFFFFFF);
   static const Color surface = Color(0xFFFAFAFA);
   static const Color surfaceMuted = Color(0xFFF0F0F2);
 
   static const Color textPrimary = Color(0xFF1A1A1A);
-  static const Color textMuted = Color(0xFF6B7280);
+
+  /// Matches the doc's `ink-700` §2.1 — "secondary text": darker/more
+  /// legible than [textMuted] for text that needs to read clearly without
+  /// competing with primary content (e.g. a greeting's lead-in line).
+  static const Color textSecondary = Color(0xFF404040);
+
+  /// Matches the doc's `ink-500` — corrected from #6B7280 (Tailwind's
+  /// gray-500), which was never a value the doc defined.
+  static const Color textMuted = Color(0xFF737373);
+
+  /// `info` (§2.3): informational/neutral system messaging. Not yet used
+  /// anywhere in the shipped app — added so screens have it available
+  /// instead of reaching for an ad hoc blue.
+  static const Color info = Color(0xFF2563EB);
 
   /// The SOS button is solid `primaryRed` in every phase now (idle,
   /// holding, sent) per the reference image's "solid red badge at rest"
@@ -39,6 +54,9 @@ class SentriColors {
   static const Color glowOuter = Color(0x14EB1B1D);
   static const Color glowInner = Color(0x29EB1B1D);
 
-  static const Color success = Color(0xFF1E8E3E);
-  static const Color caution = Color(0xFFB45309);
+  /// Matches the doc's `success` — corrected from #1E8E3E.
+  static const Color success = Color(0xFF16803C);
+
+  /// Matches the doc's `warning` — corrected from #B45309.
+  static const Color caution = Color(0xFFB54708);
 }

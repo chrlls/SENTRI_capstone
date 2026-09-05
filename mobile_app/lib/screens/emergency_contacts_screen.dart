@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
 
 import '../services/emergency_contacts_store.dart';
@@ -51,7 +52,7 @@ class EmergencyContactsScreen extends StatelessWidget {
                       builder: (_) => const AddEmergencyContactScreen(),
                     ),
                   ),
-                  icon: const Icon(Icons.add),
+                  icon: const Icon(LucideIcons.plus),
                   label: const Text('Add contact'),
                 ),
               ),
@@ -75,7 +76,7 @@ class _EmptyState extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
-              Icons.contacts_outlined,
+              LucideIcons.contact,
               size: 40,
               color: SentriColors.textMuted,
             ),
@@ -144,7 +145,7 @@ class _ContactCard extends StatelessWidget {
           ),
           IconButton(
             onPressed: onRemove,
-            icon: const Icon(Icons.delete_outline),
+            icon: const Icon(LucideIcons.trash2),
             color: SentriColors.textMuted,
             tooltip: 'Remove ${contact.contactName}',
           ),

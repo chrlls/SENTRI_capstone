@@ -2,33 +2,23 @@ import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../services/incident_status_store.dart';
+import '../services/location_service.dart';
 import '../services/sentri_api_client.dart';
 import '../widgets/hold_to_confirm_sos_button.dart' show SosButtonPhase;
 
-/// Thrown by [SosController._acquireLocation] — a device-permission
-/// concept, not an API error, so it stays here rather than in the shared
-/// API client.
-class LocationUnavailableException implements Exception {
-  final String message;
-  LocationUnavailableException(this.message);
-}
-
-/// Test-only failure injectors, toggled with `--dart-define`. Each drives
-/// the matching real failure path without needing a broken device or an
-/// unreachable server:
-///   --dart-define=FAIL_GPS=true      → no location fix is obtainable
+/// Test-only failure injector, toggled with `--dart-define`, for the
+/// network leg of a submission:
 ///   --dart-define=FAIL_NETWORK=true  → the manual-sos request never
 ///                                      reaches the server
-/// Both compile to `false` in any build that doesn't define them. They
-/// exist to exercise audit item 1.1 (a GPS failure and a network failure
-/// must produce visibly different outcomes); see docs/decisions/31. Moved
-/// here from `sos_screen.dart` unchanged so the same hooks still cover the
-/// submission path now that it is shared with the app-shell nav button.
-const bool _simulateGpsFailure = bool.fromEnvironment('FAIL_GPS');
+/// Compiles to `false` in any build that doesn't define it. Exists to
+/// exercise audit item 1.1 (a GPS failure and a network failure must
+/// produce visibly different outcomes); see docs/decisions/31. The GPS-side
+/// injector (`FAIL_GPS`) now lives in `location_service.dart`, shared with
+/// the Home tab's ambient location card.
 const bool _simulateNetworkFailure = bool.fromEnvironment('FAIL_NETWORK');
 
-/// Thrown only by the injectors above, to reach the same catch/branch a
-/// genuine device or transport fault would. Never thrown in normal use.
+/// Thrown only by the injector above, to reach the same catch/branch a
+/// genuine transport fault would. Never thrown in normal use.
 class _SimulatedFailure implements Exception {
   final String kind;
   const _SimulatedFailure(this.kind);
@@ -101,7 +91,7 @@ class SosController extends ChangeNotifier {
 
     final Position position;
     try {
-      position = await _acquireLocation();
+      position = await acquireCurrentLocation();
     } on LocationUnavailableException catch (e) {
       // GPS failed — visibly distinct from a network/server failure. The
       // send never left the device; the phase returns to idle so the
@@ -163,63 +153,6 @@ class SosController extends ChangeNotifier {
     }
     _errorMessage = null;
     notifyListeners();
-  }
-
-  /// Verbatim from the former `_SosScreenState._acquireLocation` — only the
-  /// surrounding class changed.
-  Future<Position> _acquireLocation() async {
-    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      throw LocationUnavailableException(
-        'Location services are turned off. Enable location and try again.',
-      );
-    }
-
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
-        throw LocationUnavailableException(
-          'Location permission denied. SENTRI needs your location to send an SOS.',
-        );
-      }
-    }
-
-    if (permission == LocationPermission.deniedForever) {
-      throw LocationUnavailableException(
-        'Location permission is permanently denied. Enable it in system settings.',
-      );
-    }
-
-    try {
-      if (_simulateGpsFailure) {
-        // Behaves like a device that can't produce a fix at all — the
-        // real catch below then runs the fallback + throw path.
-        throw const _SimulatedFailure('gps');
-      }
-      return await Geolocator.getCurrentPosition(
-        // Bound the wait: without a limit `getCurrentPosition` blocks
-        // until a fresh fix arrives, which can be never (weak signal,
-        // indoors) — the civilian would sit on "SENDING SOS" forever with
-        // no error. On timeout, fall back to the last known fix if there
-        // is one rather than failing outright.
-        locationSettings: const LocationSettings(
-          timeLimit: Duration(seconds: 12),
-        ),
-      );
-    } catch (_) {
-      final lastKnown = _simulateGpsFailure
-          ? null
-          : await Geolocator.getLastKnownPosition();
-      if (lastKnown != null) return lastKnown;
-      // A GPS fix timing out / failing is a location problem, not a server
-      // one — classify it as such so the caller shows the right message
-      // (audit 1.1: a GPS failure must not read as "couldn't reach the
-      // server").
-      throw LocationUnavailableException(
-        'Couldn\'t get a location fix. Move to an open area and try again.',
-      );
-    }
   }
 
   /// Fires the `manual-sos` request. On `201`, records the send and hands

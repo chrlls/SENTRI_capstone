@@ -3,6 +3,7 @@ import 'dart:math' show cos, pi;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart' show Ticker;
 import 'package:flutter/services.dart' show HapticFeedback;
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../theme/sentri_colors.dart';
 import 'sos_particle_field.dart';
@@ -571,7 +572,7 @@ class _ButtonLabel extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.send_rounded, color: Colors.white, size: 24),
+              Icon(LucideIcons.send, color: Colors.white, size: 24),
               SizedBox(height: 6),
               Text(
                 'SENDING SOS',
@@ -612,7 +613,7 @@ class _ButtonLabel extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.check_rounded, color: Colors.white, size: 26),
+                  Icon(LucideIcons.check, color: Colors.white, size: 26),
                   SizedBox(height: 6),
                   Text(
                     'SOS CONFIRMED',

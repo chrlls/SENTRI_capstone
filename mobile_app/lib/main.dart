@@ -63,10 +63,11 @@ class SentriApp extends StatelessWidget {
         // Material 3's seed-derived tonal palette picks a muted, darkened
         // tone for `primary` in light mode rather than the literal accent
         // hex (confirmed by rendering it — the seed alone produced a dull
-        // brownish button, not #EB1B1D), and would also tint the AppBar's
-        // surface a pale pink instead of the intended near-white. Pinning
-        // these explicitly is what actually makes "red as the sole accent
-        // color" true on screen, not just in the seed value.
+        // brownish button, not SentriColors.primaryRed), and would also
+        // tint the AppBar's surface a pale pink instead of the intended
+        // near-white. Pinning these explicitly is what actually makes "red
+        // as the sole accent color" true on screen, not just in the seed
+        // value.
         theme: ThemeData(
           useMaterial3: true,
           brightness: Brightness.light,

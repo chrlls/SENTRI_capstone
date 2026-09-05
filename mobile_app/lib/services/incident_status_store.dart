@@ -97,6 +97,14 @@ class IncidentStatusStore extends ChangeNotifier {
   IncidentLifecycle get status => _status;
   bool get isTracking => _incidentId != null;
   bool get isPolling => _timer?.isActive ?? false;
+
+  /// True while there is a real, still-open incident — [isTracking] plus a
+  /// non-terminal [status]. `isTracking` alone can stay true well after
+  /// resolution (nothing clears `_incidentId` but `stopTracking`, i.e.
+  /// sign-out), so UI asking "is anything actually still happening right
+  /// now" — e.g. the Home tab's safety-status card — should read this
+  /// instead of `isTracking`.
+  bool get hasActiveIncident => _incidentId != null && !_isTerminal(_status);
   DateTime? get lastPolledAt => _lastPolledAt;
   Object? get lastError => _lastError;
 

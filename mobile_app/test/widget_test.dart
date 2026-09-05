@@ -44,7 +44,15 @@ void main() {
     // animation, so the tree never fully settles.
     await tester.pump();
 
-    expect(find.text("You're all set"), findsOneWidget);
+    // Home's real content (Decision 28's deferred scope), not the old
+    // placeholder screen: the two-line greeting (no user record when not
+    // logged in, so the name line falls back to "there" — deterministic,
+    // unlike the time-of-day line above it) and the idle safety-status
+    // card, which reads real `IncidentStatusStore` state rather than a
+    // static string. Both render synchronously, unlike the location
+    // card's async GPS fetch.
+    expect(find.text('there'), findsOneWidget);
+    expect(find.text('No nearby incidents'), findsOneWidget);
     expect(find.text('Home'), findsOneWidget);
     expect(find.text('Profile'), findsOneWidget);
     // Idle SOS label on the nested button.

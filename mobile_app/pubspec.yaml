@@ -41,6 +41,19 @@ dependencies:
   path_provider: ^2.1.6
   http_parser: ^4.1.2
 
+  # Lucide Icons — the icon family SENTRI_DESIGN_SYSTEM_V1.1.md §7 mandates
+  # app-wide. Chosen over the `lucide_icons` package published under the
+  # verified lucide.dev domain because that package currently fails pub.dev
+  # analysis (Dart 3 incompatible); this fork is Dart-3-compatible and the
+  # most widely used Lucide port for Flutter.
+  lucide_icons_flutter: ^3.1.17
+
+  # Reverse-geocodes the Home tab's GPS fix into a human-readable place
+  # name (e.g. "Tagum City") via the platform's native geocoder — real
+  # device data, not a hardcoded place name. Published by Baseflow, the
+  # same maintainer as `geolocator` above.
+  geocoding: ^5.0.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

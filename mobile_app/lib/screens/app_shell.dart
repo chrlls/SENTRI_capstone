@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
 
 import '../controllers/sos_controller.dart';
@@ -117,7 +118,7 @@ class _SosHoldErrorBanner extends StatelessWidget {
           child: Row(
             children: [
               const Icon(
-                Icons.error_outline,
+                LucideIcons.circleAlert,
                 size: 20,
                 color: SentriColors.caution,
               ),

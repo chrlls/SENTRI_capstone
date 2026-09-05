@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/auth_provider.dart';
@@ -62,7 +63,7 @@ class ProfileScreen extends StatelessWidget {
               _AccountHeader(user: user),
               const SizedBox(height: 28),
               _ProfileRow(
-                icon: Icons.contacts_outlined,
+                icon: LucideIcons.contact,
                 label: 'Emergency Contacts',
                 subtitle: contactCount == 0
                     ? 'No contacts added yet'
@@ -75,7 +76,7 @@ class ProfileScreen extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               _ProfileRow(
-                icon: Icons.notifications_none,
+                icon: LucideIcons.bell,
                 label: 'Notifications',
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(
@@ -85,7 +86,7 @@ class ProfileScreen extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               _ProfileRow(
-                icon: Icons.lock_outline,
+                icon: LucideIcons.lock,
                 label: 'Privacy & Security',
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(
@@ -95,7 +96,7 @@ class ProfileScreen extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               _ProfileRow(
-                icon: Icons.logout,
+                icon: LucideIcons.logOut,
                 label: 'Sign Out',
                 labelColor: SentriColors.primaryRed,
                 iconColor: SentriColors.primaryRed,
@@ -128,7 +129,7 @@ class _AccountHeader extends StatelessWidget {
           radius: 40,
           backgroundColor: SentriColors.surfaceMuted,
           child: Icon(
-            Icons.person_outline,
+            LucideIcons.user,
             size: 40,
             color: SentriColors.textMuted,
           ),
@@ -174,27 +175,27 @@ class _StatusBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final ({IconData icon, String label, Color color}) spec = switch (status) {
       'active' => (
-        icon: Icons.check_circle,
+        icon: LucideIcons.circleCheck,
         label: 'Verified',
         color: SentriColors.success,
       ),
       'pending_verification' => (
-        icon: Icons.hourglass_bottom,
+        icon: LucideIcons.hourglass,
         label: 'Pending verification',
         color: SentriColors.caution,
       ),
       'suspended' => (
-        icon: Icons.block,
+        icon: LucideIcons.ban,
         label: 'Account suspended',
         color: SentriColors.caution,
       ),
       'deactivated' => (
-        icon: Icons.block,
+        icon: LucideIcons.ban,
         label: 'Account deactivated',
         color: SentriColors.caution,
       ),
       _ => (
-        icon: Icons.help_outline,
+        icon: LucideIcons.helpCircle,
         label: 'Status unknown',
         color: SentriColors.textMuted,
       ),
@@ -282,7 +283,7 @@ class _ProfileRow extends StatelessWidget {
                 ),
               ),
               const Icon(
-                Icons.chevron_right,
+                LucideIcons.chevronRight,
                 size: 20,
                 color: SentriColors.textMuted,
               ),
