@@ -1,1 +1,20 @@
 CLAUDE.md
+
+# Claude Code local tooling — skills, agents, and their install-state
+# lockfile. Personal productivity tooling, not project convention; never
+# shared via git. If a specific subagent/hook under .claude/ should
+# become shared team convention later, carve out a narrower exception
+# rather than un-ignoring the whole directory.
+.claude/
+.agents/
+skills-lock.json
+
+# Editor/IDE local state
+.idea/
+
+# Local verification/scratch tool output
+.verify5/
+
+# Flutter DevTools local machine config (paths/ports specific to this
+# machine's DevTools setup)
+mobile_app/devtools_options.yaml
