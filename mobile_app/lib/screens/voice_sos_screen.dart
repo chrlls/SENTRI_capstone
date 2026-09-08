@@ -8,6 +8,8 @@ import 'package:record/record.dart';
 
 import '../services/sentri_api_client.dart';
 import '../theme/sentri_colors.dart';
+import '../theme/sentri_text.dart';
+import '../theme/sentri_tokens.dart';
 
 enum _VoiceStage { intro, micBlocked, recording, uploading, completed, inconclusive, error }
 
@@ -24,6 +26,11 @@ enum _VoiceStage { intro, micBlocked, recording, uploading, completed, inconclus
 /// 2. The manual SOS already succeeded before this screen ever opens.
 ///    Skipping/cancelling here must never read as undoing that — there
 ///    is deliberately no "are you sure?" confirmation on exit.
+///
+/// Visually this is a supporting, evidence-capture flow, not a second SOS
+/// trigger (design doc §12, Voice Message) — the record control uses the
+/// app's non-emergency accent (Cosmos Blue), not Crimson Blaze, so it
+/// never reads as another way to fire an emergency.
 class VoiceSosScreen extends StatefulWidget {
   final String token;
   final double latitude;
@@ -143,37 +150,34 @@ class _VoiceSosScreenState extends State<VoiceSosScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: SentriColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         title: const Text('Voice message'),
-        backgroundColor: SentriColors.background,
-        foregroundColor: SentriColors.textPrimary,
-        elevation: 0,
         automaticallyImplyLeading: false,
       ),
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(SentriSpacing.xl),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               // Sent regardless of anything on this screen — never framed
               // as conditional on what happens below (architectural fact
               // #2 above).
-              const Row(
+              Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(LucideIcons.circleCheck, color: SentriColors.success, size: 20),
-                  SizedBox(width: 8),
+                  const Icon(LucideIcons.circleCheck, color: SentriColors.success, size: 20),
+                  const SizedBox(width: SentriSpacing.sm),
                   Flexible(
                     child: Text(
                       'SOS sent. Help is on the way.',
-                      style: TextStyle(color: SentriColors.textPrimary, fontWeight: FontWeight.w600),
+                      style: SentriText.bodySmall.copyWith(fontWeight: FontWeight.w600),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 40),
+              const SizedBox(height: SentriSpacing.xxxl),
               Expanded(child: Center(child: _buildStageContent(context))),
             ],
           ),
@@ -194,12 +198,12 @@ class _VoiceSosScreenState extends State<VoiceSosScreen> {
       case _VoiceStage.recording:
         return _RecordingContent(elapsed: _elapsed, onStop: _stopAndUpload);
       case _VoiceStage.uploading:
-        return const Column(
+        return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            CircularProgressIndicator(color: SentriColors.textPrimary),
-            SizedBox(height: 16),
-            Text('Sending voice message…', style: TextStyle(color: SentriColors.textMuted)),
+            const CircularProgressIndicator(),
+            const SizedBox(height: SentriSpacing.lg),
+            Text('Sending voice message…', style: SentriText.bodySmall.copyWith(color: SentriColors.textMuted)),
           ],
         );
       case _VoiceStage.completed:
@@ -232,25 +236,28 @@ class _IntroContent extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Text(
+        Text(
           'You can also record a short voice message for responders. This is optional.',
           textAlign: TextAlign.center,
-          style: TextStyle(color: SentriColors.textMuted, fontSize: 15, height: 1.4),
+          style: SentriText.bodySmall.copyWith(color: SentriColors.textMuted),
         ),
-        const SizedBox(height: 32),
+        const SizedBox(height: SentriSpacing.xxl),
         SizedBox(
           width: 96,
           height: 96,
           child: FilledButton(
             onPressed: onRecord,
+            // Cosmos Blue, not the emergency red — this is a supporting
+            // evidence-capture action, not another SOS trigger (design
+            // doc §12).
             style: FilledButton.styleFrom(
-              backgroundColor: SentriColors.sosAlarm,
+              backgroundColor: SentriColors.info,
               shape: const CircleBorder(),
             ),
             child: const Icon(LucideIcons.mic, color: Colors.white, size: 36),
           ),
         ),
-        const SizedBox(height: 28),
+        const SizedBox(height: SentriSpacing.xl + SentriSpacing.xs),
         TextButton(
           onPressed: onSkip,
           child: const Text('Skip', style: TextStyle(color: SentriColors.textMuted)),
@@ -272,22 +279,21 @@ class _MicBlockedContent extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         const Icon(LucideIcons.micOff, color: SentriColors.textMuted, size: 40),
-        const SizedBox(height: 16),
-        const Text(
+        const SizedBox(height: SentriSpacing.lg),
+        Text(
           'SENTRI needs microphone access to record a voice message. Your SOS was already sent either way.',
           textAlign: TextAlign.center,
-          style: TextStyle(color: SentriColors.textPrimary, fontSize: 15, height: 1.4),
+          style: SentriText.bodySmall,
         ),
-        const SizedBox(height: 24),
-        FilledButton(
+        const SizedBox(height: SentriSpacing.xl),
+        // Themed `OutlinedButton` (white fill, ink-300 border) — the
+        // app-wide secondary-button treatment, replacing a hand-styled
+        // filled/surfaceMuted button.
+        OutlinedButton(
           onPressed: onOpenSettings,
-          style: FilledButton.styleFrom(
-            backgroundColor: SentriColors.surfaceMuted,
-            foregroundColor: SentriColors.textPrimary,
-          ),
           child: const Text('Open Settings'),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: SentriSpacing.md),
         TextButton(
           onPressed: onSkip,
           child: const Text('Skip', style: TextStyle(color: SentriColors.textMuted)),
@@ -318,17 +324,22 @@ class _RecordingContent extends StatelessWidget {
         // low-key active-recording indicator SENTRI_DESIGN_SYSTEM_V1.1.md
         // §12 (Voice Message → Recording) describes literally — no icon
         // family, Lucide included, ships a plain filled-circle glyph.
+        // Stays Crimson Blaze: a small solid recording dot is a universal
+        // "recording" convention independent of SENTRI's own emergency
+        // semantics, unlike the large record button above.
         Container(
           width: 12,
           height: 12,
           decoration: const BoxDecoration(
-            color: SentriColors.sosAlarm,
+            color: SentriColors.primaryRed,
             shape: BoxShape.circle,
           ),
         ),
-        const SizedBox(height: 12),
-        Text(_label, style: const TextStyle(color: SentriColors.textPrimary, fontSize: 28, fontWeight: FontWeight.w300)),
-        const SizedBox(height: 28),
+        const SizedBox(height: SentriSpacing.md),
+        // w500, not the original w300 — SENTRI's typography direction
+        // avoids excessively thin weights even for a numeric readout.
+        Text(_label, style: SentriText.h1.copyWith(fontWeight: FontWeight.w500)),
+        const SizedBox(height: SentriSpacing.xl + SentriSpacing.xs),
         SizedBox(
           width: 96,
           height: 96,
@@ -359,17 +370,10 @@ class _ResultContent extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         const Icon(LucideIcons.circleCheck, color: SentriColors.success, size: 56),
-        const SizedBox(height: 16),
-        Text(message, style: const TextStyle(color: SentriColors.textPrimary, fontSize: 17)),
-        const SizedBox(height: 28),
-        FilledButton(
-          onPressed: onDone,
-          style: FilledButton.styleFrom(
-            backgroundColor: SentriColors.surfaceMuted,
-            foregroundColor: SentriColors.textPrimary,
-          ),
-          child: const Text('Done'),
-        ),
+        const SizedBox(height: SentriSpacing.lg),
+        Text(message, style: SentriText.body),
+        const SizedBox(height: SentriSpacing.xl + SentriSpacing.xs),
+        OutlinedButton(onPressed: onDone, child: const Text('Done')),
       ],
     );
   }
@@ -390,15 +394,14 @@ class _ErrorContent extends StatelessWidget {
         Text(
           message,
           textAlign: TextAlign.center,
-          style: const TextStyle(color: SentriColors.caution, fontSize: 15),
+          style: SentriText.bodySmall.copyWith(color: SentriColors.caution),
         ),
-        const SizedBox(height: 24),
-        FilledButton(
-          onPressed: onRetry,
-          style: FilledButton.styleFrom(backgroundColor: SentriColors.sosAlarm, foregroundColor: Colors.white),
-          child: const Text('Try again'),
-        ),
-        const SizedBox(height: 12),
+        const SizedBox(height: SentriSpacing.xl),
+        // No local color override — retrying a voice-message upload isn't
+        // itself an emergency action (the manual SOS already succeeded),
+        // so it takes the app's ordinary primary-button treatment.
+        FilledButton(onPressed: onRetry, child: const Text('Try again')),
+        const SizedBox(height: SentriSpacing.md),
         TextButton(
           onPressed: onSkip,
           child: const Text('Skip', style: TextStyle(color: SentriColors.textMuted)),

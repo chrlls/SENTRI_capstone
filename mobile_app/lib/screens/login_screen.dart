@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../providers/auth_provider.dart';
 import '../theme/sentri_colors.dart';
+import '../widgets/sentri_submit_button.dart';
 import 'app_shell.dart';
 import 'register_screen.dart';
 
@@ -66,7 +67,10 @@ class _LoginScreenState extends State<LoginScreen> {
                 if (widget.successMessage != null) ...[
                   Text(
                     widget.successMessage!,
-                    style: const TextStyle(color: SentriColors.success),
+                    style: const TextStyle(
+                      color: SentriColors.success,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -74,10 +78,17 @@ class _LoginScreenState extends State<LoginScreen> {
                 // password and nonexistent email (API_CONTRACTS.md) —
                 // shown verbatim, never paraphrased into something that
                 // might accidentally reveal more than the backend does.
+                // `colorScheme.error` is the emergency red (see
+                // `theme/sentri_theme.dart`), so this reads as a genuine
+                // error rather than the amber "caution" tone it used to
+                // alias to.
                 if (auth.errorMessage != null) ...[
                   Text(
                     auth.errorMessage!,
-                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -97,15 +108,10 @@ class _LoginScreenState extends State<LoginScreen> {
                       (value == null || value.isEmpty) ? 'Password is required.' : null,
                 ),
                 const SizedBox(height: 24),
-                FilledButton(
-                  onPressed: auth.isWorking ? null : _handleLogin,
-                  child: auth.isWorking
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('Log in'),
+                SentriSubmitButton(
+                  label: 'Log in',
+                  loading: auth.isWorking,
+                  onPressed: _handleLogin,
                 ),
                 TextButton(
                   onPressed: auth.isWorking

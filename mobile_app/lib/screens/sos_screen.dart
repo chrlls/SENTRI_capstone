@@ -11,7 +11,17 @@ import '../providers/auth_provider.dart';
 import '../services/incident_status_store.dart';
 import '../theme/sentri_colors.dart';
 import '../widgets/hold_to_confirm_sos_button.dart';
+import '../widgets/sos_reveal/sos_reveal_binding.dart';
+import '../widgets/sos_reveal/sos_reveal_geometry.dart' show kSosDiscToCanvasRatio;
 import 'voice_sos_screen.dart';
+
+/// Target on-screen SOS-disc diameter, as a fraction of screen width
+/// clamped to a sensible range — large and dominant (design direction:
+/// ~200-220px on a typical phone) without hardcoding a pixel value that
+/// would crowd a small screen or look undersized on a large one.
+const double _kSosButtonMinDiameter = 170;
+const double _kSosButtonMaxDiameter = 220;
+const double _kSosButtonWidthFraction = 0.56;
 
 /// The manual-SOS submission itself — GPS acquisition, the `manual-sos`
 /// request, and the incident-status hand-off — lives in [SosController]
@@ -235,6 +245,16 @@ class _SosScreenState extends State<SosScreen> with WidgetsBindingObserver {
         sos.phase != SosButtonPhase.sent &&
         sos.phase != SosButtonPhase.resolvedAcknowledgement;
 
+    // The button itself (the red/white disc) is what should land at
+    // ~200-220px — the surrounding box just needs to be big enough that
+    // FittedBox scales the disc to that size, per `kSosDiscToCanvasRatio`.
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final sosDiscDiameter = (screenWidth * _kSosButtonWidthFraction).clamp(
+      _kSosButtonMinDiameter,
+      _kSosButtonMaxDiameter,
+    );
+    final sosButtonBoxSize = sosDiscDiameter / kSosDiscToCanvasRatio;
+
     return Scaffold(
       backgroundColor: SentriColors.background,
       appBar: AppBar(
@@ -249,15 +269,23 @@ class _SosScreenState extends State<SosScreen> with WidgetsBindingObserver {
       // shell's SOS button — not a tab. (The former no-op `_HomeBottomNav`
       // placeholder was removed with this change.)
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
+          // The button is now sized from screen width alone (see
+          // `sosButtonBoxSize` above), so on a screen that's wide but
+          // short (or with enlarged accessibility text) the column can
+          // legitimately be taller than the viewport. Scrolling — rather
+          // than a fixed height budget guessed per phase — is what keeps
+          // this genuinely responsive instead of just "responsive on the
+          // screen sizes it was checked on".
           padding: const EdgeInsets.all(24),
           // `width: double.infinity` forces the Column to fill the content
           // width so its default `crossAxisAlignment: center` actually
           // centres the button — without it the Column shrink-wraps to its
-          // widest child (the 240px button box) and pins left.
+          // widest child (the button box) and pins left.
           child: SizedBox(
             width: double.infinity,
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 // Fixed top gap so the SOS button sits in the upper-middle
                 // of the screen and never shifts between phases.
@@ -312,37 +340,49 @@ class _SosScreenState extends State<SosScreen> with WidgetsBindingObserver {
                   )
                 else
                   // Scaled from the widget's natural 360px footprint (220px
-                  // disc) to a 240px box — ~147px disc — via FittedBox, so
-                  // nothing inside the widget (hold gesture, haptics,
-                  // particle field) had to change. Still ~3x the 48dp
-                  // minimum touch target. Keyed so inserting the error
-                  // message above it doesn't tear down the button's State
-                  // (and its in-progress hold) mid-interaction.
-                  SizedBox(
+                  // disc) via FittedBox — the box is sized so the disc
+                  // itself lands at `sosDiscDiameter` (~200-220px on a
+                  // typical phone, responsive on others), so nothing
+                  // inside the widget (hold gesture, haptics) had to
+                  // change. Keyed so inserting the error message above it
+                  // doesn't tear down the button's State (and its
+                  // in-progress hold) mid-interaction.
+                  SosRevealBinding(
                     key: const ValueKey('sos-hold-button'),
-                    width: 240,
-                    height: 240,
-                    child: FittedBox(
-                      fit: BoxFit.contain,
-                      child: HoldToConfirmSosButton(
-                        phase: sos.phase,
-                        idleLabel: 'SOS',
-                        idleLabelStyle: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 54,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.5,
+                    // No tap affordance to protect here (unlike the nav
+                    // bar) — this button only ever holds.
+                    startDelay: Duration.zero,
+                    onHoldComplete: _handleHoldComplete,
+                    builder: (context, anchorKey, hooks) => SizedBox(
+                      key: anchorKey,
+                      width: sosButtonBoxSize,
+                      height: sosButtonBoxSize,
+                      child: FittedBox(
+                        fit: BoxFit.contain,
+                        child: HoldToConfirmSosButton(
+                          phase: sos.phase,
+                          idleLabel: 'SOS',
+                          idleLabelStyle: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 54,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.5,
+                          ),
+                          onHoldStart: hooks.onHoldStart,
+                          onHoldCancel: hooks.onHoldCancel,
+                          onHoldComplete: hooks.onHoldComplete,
+                          onHoldProgress: (p) {
+                            hooks.onHoldProgress(p);
+                            // Only rebuild when the "is holding" state
+                            // flips — the button paints its own % readout;
+                            // this screen just needs to show/hide the hint
+                            // panel.
+                            final wasHolding = _screenHoldProgress > 0.001;
+                            final nowHolding = p > 0.001;
+                            _screenHoldProgress = p;
+                            if (wasHolding != nowHolding) setState(() {});
+                          },
                         ),
-                        onHoldComplete: _handleHoldComplete,
-                        onHoldProgress: (p) {
-                          // Only rebuild when the "is holding" state flips —
-                          // the button paints its own % readout; this
-                          // screen just needs to show/hide the hint panel.
-                          final wasHolding = _screenHoldProgress > 0.001;
-                          final nowHolding = p > 0.001;
-                          _screenHoldProgress = p;
-                          if (wasHolding != nowHolding) setState(() {});
-                        },
                       ),
                     ),
                   ),
@@ -385,7 +425,10 @@ class _SosScreenState extends State<SosScreen> with WidgetsBindingObserver {
                       ),
                     ],
                   ),
-                const Spacer(),
+                // A `Spacer` doesn't work once the column can scroll (it
+                // needs a bounded height to divide); a fixed gap gives the
+                // same bottom breathing room the button already has above.
+                const SizedBox(height: 40),
               ],
             ),
           ),
@@ -529,12 +572,19 @@ class _LocationReadyRow extends StatelessWidget {
           children: [
             _Dot(dot),
             const SizedBox(width: 8),
-            Text(
-              label,
-              style: const TextStyle(
-                color: SentriColors.textPrimary,
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
+            // `Flexible`, not a bare `Text` — on a narrow screen the
+            // longer status strings (e.g. "Getting your location…") can
+            // exceed the row's available width; this lets it ellipsize
+            // instead of overflowing.
+            Flexible(
+              child: Text(
+                label,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: SentriColors.textPrimary,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
           ],
@@ -608,7 +658,10 @@ class _SendStatusRow extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 16),
       decoration: BoxDecoration(
-        color: SentriColors.surface,
+        // Varden — a subtle contextual surface for the one card the app
+        // shows while actively transmitting, distinguishing it from the
+        // plain neutral cards used elsewhere on this screen.
+        color: SentriColors.highlight,
         borderRadius: BorderRadius.circular(14),
       ),
       child: Row(
@@ -662,10 +715,13 @@ class _SendStatusColumn extends StatelessWidget {
     final String word;
     switch (step) {
       case StepStatus.idle:
-        dot = SentriColors.textMuted;
+        dot = SentriColors.textSecondary;
         word = 'Waiting';
       case StepStatus.working:
-        dot = SentriColors.caution;
+        // Cosmos Blue — this is a neutral "in progress" signal, not a
+        // warning, so it takes the system/informational color rather than
+        // caution amber.
+        dot = SentriColors.info;
         word = working;
       case StepStatus.ok:
         dot = SentriColors.success;
@@ -694,8 +750,11 @@ class _SendStatusColumn extends StatelessWidget {
             Text(
               word,
               style: TextStyle(
+                // `textSecondary`, not `textMuted`: this card now sits on
+                // the Varden highlight surface, where `textMuted` no
+                // longer clears the minimum text contrast.
                 color: step == StepStatus.idle
-                    ? SentriColors.textMuted
+                    ? SentriColors.textSecondary
                     : SentriColors.textPrimary,
                 fontSize: 12,
               ),
@@ -733,7 +792,10 @@ class _ConfirmedStatusCard extends StatelessWidget {
         width: double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
-          color: SentriColors.surface,
+          // Same Varden surface as the Sending card — one continuous
+          // "system is actively handling this" visual language across
+          // both screens.
+          color: SentriColors.highlight,
           borderRadius: BorderRadius.circular(14),
         ),
         child: Column(
@@ -756,7 +818,10 @@ class _ConfirmedStatusCard extends StatelessWidget {
             if (dispatcherReviewing)
               _StatusRow(
                 icon: LucideIcons.userCheck,
-                iconColor: SentriColors.textPrimary,
+                // Cosmos Blue: a real human dispatcher action, confirmed
+                // by the backend (Decision 31 §4) — the "trust/system"
+                // color, not a plain neutral.
+                iconColor: SentriColors.info,
                 label: 'Dispatcher reviewing',
                 trailing: reviewingAt != null
                     ? TimeOfDay.fromDateTime(reviewingAt!).format(context)
@@ -807,7 +872,10 @@ class _StatusRow extends StatelessWidget {
         if (trailing != null)
           Text(
             trailing!,
-            style: const TextStyle(color: SentriColors.textMuted, fontSize: 13),
+            // `textSecondary`, not `textMuted` — this row only ever sits on
+            // the Varden `_ConfirmedStatusCard` surface, where `textMuted`
+            // no longer clears the minimum text contrast.
+            style: const TextStyle(color: SentriColors.textSecondary, fontSize: 13),
           ),
       ],
     );

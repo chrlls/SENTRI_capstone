@@ -10,7 +10,10 @@ import '../providers/auth_provider.dart';
 import '../services/incident_status_store.dart';
 import '../services/location_service.dart';
 import '../theme/sentri_colors.dart';
+import '../theme/sentri_text.dart';
+import '../theme/sentri_tokens.dart';
 import '../widgets/floating_nav_bar.dart';
+import '../widgets/sentri_card.dart';
 import 'alert_history_screen.dart';
 import 'notifications_screen.dart';
 import 'sos_screen.dart';
@@ -151,10 +154,10 @@ class _HomeScreenState extends State<HomeScreen> {
         bottom: false,
         child: SingleChildScrollView(
           padding: EdgeInsets.fromLTRB(
-            24,
-            16,
-            24,
-            floatingNavBarContentInset(context) + 24,
+            SentriSpacing.xl,
+            SentriSpacing.lg,
+            SentriSpacing.xl,
+            floatingNavBarContentInset(context) + SentriSpacing.xl,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -171,7 +174,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           // _V1.1.md §3.2's `H3` token (18/600) after an
                           // on-device pass found even that too small —
                           // confirmed readable at this size on a physical
-                          // phone.
+                          // phone. Deliberate, documented exception to the
+                          // scale, not an inconsistency to migrate away.
                           '${_greeting()},',
                           style: const TextStyle(
                             fontSize: 22,
@@ -198,12 +202,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   _NotificationBell(onTap: _openNotifications),
                 ],
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: SentriSpacing.xl),
               _SafetyStatusCard(
                 store: incidentStore,
                 onViewStatus: _openSosStatus,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: SentriSpacing.md),
               _LocationCard(
                 loading: _loadingLocation,
                 cityName: _cityName,
@@ -215,7 +219,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 onRetry: _loadLocation,
               ),
               if (!incidentStore.hasActiveIncident) ...[
-                const SizedBox(height: 32),
+                const SizedBox(height: SentriSpacing.xxl),
                 _RecentActivitySection(
                   sosSentAt: sos.sosSentAt,
                   lastStatus: incidentStore.status,
@@ -289,6 +293,12 @@ class _SafetyStatusCard extends StatelessWidget {
 
   const _SafetyStatusCard({required this.store, required this.onViewStatus});
 
+  /// The two tint alphas every status card in this file now shares —
+  /// collapsed from five independently-chosen values (0.06/0.08/0.12/0.2/
+  /// 0.35) down to one background tint and one border tint.
+  static const double _tintBackgroundAlpha = 0.08;
+  static const double _tintBorderAlpha = 0.24;
+
   String get _activeLabel => switch (store.status) {
         IncidentLifecycle.detected ||
         IncidentLifecycle.dashboardAlerted =>
@@ -302,20 +312,17 @@ class _SafetyStatusCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!store.hasActiveIncident) {
-      return Container(
+      return SentriCard(
+        color: SentriColors.success.withValues(alpha: _tintBackgroundAlpha),
+        borderColor: SentriColors.success.withValues(alpha: _tintBorderAlpha),
         padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: SentriColors.success.withValues(alpha: 0.06),
-          border: Border.all(color: SentriColors.success.withValues(alpha: 0.2)),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: const Row(
+        child: Row(
           children: [
-            _StatusIconBadge(
+            const _StatusIconBadge(
               icon: LucideIcons.shieldCheck,
               color: SentriColors.success,
             ),
-            SizedBox(width: 16),
+            const SizedBox(width: SentriSpacing.lg),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -325,20 +332,15 @@ class _SafetyStatusCard extends StatelessWidget {
                     // stronger (and unverifiable) claim that the user is
                     // objectively safe.
                     'No nearby incidents',
-                    style: TextStyle(
-                      fontSize: 16,
+                    style: SentriText.body.copyWith(
                       fontWeight: FontWeight.w600,
                       color: SentriColors.success,
                     ),
                   ),
-                  SizedBox(height: 4),
+                  const SizedBox(height: SentriSpacing.xs),
                   Text(
                     "We'll notify you if an incident is reported nearby.",
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: SentriColors.textMuted,
-                      height: 1.4,
-                    ),
+                    style: SentriText.bodySmall.copyWith(color: SentriColors.textMuted),
                   ),
                 ],
               ),
@@ -348,53 +350,39 @@ class _SafetyStatusCard extends StatelessWidget {
       );
     }
 
-    return Material(
-      color: SentriColors.caution.withValues(alpha: 0.08),
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        onTap: onViewStatus,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: SentriColors.caution.withValues(alpha: 0.35)),
+    return SentriCard(
+      color: SentriColors.caution.withValues(alpha: _tintBackgroundAlpha),
+      borderColor: SentriColors.caution.withValues(alpha: _tintBorderAlpha),
+      padding: const EdgeInsets.all(20),
+      onTap: onViewStatus,
+      child: Row(
+        children: [
+          const _StatusIconBadge(
+            icon: LucideIcons.shieldAlert,
+            color: SentriColors.caution,
           ),
-          child: Row(
-            children: [
-              const _StatusIconBadge(
-                icon: LucideIcons.shieldAlert,
-                color: SentriColors.caution,
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _activeLabel,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: SentriColors.caution,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    const Text(
-                      'Tap to view the full status of your SOS.',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: SentriColors.textMuted,
-                        height: 1.4,
-                      ),
-                    ),
-                  ],
+          const SizedBox(width: SentriSpacing.lg),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _activeLabel,
+                  style: SentriText.body.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: SentriColors.caution,
+                  ),
                 ),
-              ),
-              const Icon(LucideIcons.chevronRight, size: 20, color: SentriColors.textMuted),
-            ],
+                const SizedBox(height: SentriSpacing.xs),
+                Text(
+                  'Tap to view the full status of your SOS.',
+                  style: SentriText.bodySmall.copyWith(color: SentriColors.textMuted),
+                ),
+              ],
+            ),
           ),
-        ),
+          const Icon(LucideIcons.chevronRight, size: 20, color: SentriColors.textMuted),
+        ],
       ),
     );
   }
@@ -452,16 +440,15 @@ class _LocationCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasFix = !loading && error == null;
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: SentriColors.surface,
-        borderRadius: BorderRadius.circular(16),
-      ),
+    return SentriCard(
       child: Row(
         children: [
           hasFix
-              ? const _StatusIconBadge(icon: LucideIcons.mapPin, color: SentriColors.primaryRed)
+              // Cosmos Blue, not the emergency red this badge used to
+              // borrow — a resolved GPS fix is informational, not an
+              // emergency signal (design doc: location/GPS data uses the
+              // system-blue family).
+              ? const _StatusIconBadge(icon: LucideIcons.mapPin, color: SentriColors.info)
               : Icon(
                   error != null ? LucideIcons.mapPinOff : LucideIcons.mapPin,
                   color: SentriColors.textMuted,
@@ -482,17 +469,20 @@ class _LocationCard extends StatelessWidget {
 
   Widget _buildContent(BuildContext context) {
     if (loading) {
-      return const Row(
+      return Row(
         children: [
-          SizedBox(
+          const SizedBox(
             width: 14,
             height: 14,
             child: CircularProgressIndicator(strokeWidth: 2, color: SentriColors.textMuted),
           ),
-          SizedBox(width: 10),
-          Text(
-            'Getting your location…',
-            style: TextStyle(fontSize: 13, color: SentriColors.textMuted),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Text(
+              'Getting your location…',
+              overflow: TextOverflow.ellipsis,
+              style: SentriText.bodySmall.copyWith(color: SentriColors.textMuted),
+            ),
           ),
         ],
       );
@@ -501,7 +491,7 @@ class _LocationCard extends StatelessWidget {
     if (error != null) {
       return Text(
         error!,
-        style: const TextStyle(fontSize: 13, color: SentriColors.textMuted, height: 1.35),
+        style: SentriText.bodySmall.copyWith(color: SentriColors.textMuted),
       );
     }
 
@@ -509,22 +499,19 @@ class _LocationCard extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Your location',
-          style: TextStyle(fontSize: 12, color: SentriColors.textMuted, fontWeight: FontWeight.w500),
-        ),
+        Text('Your location', style: SentriText.caption),
         const SizedBox(height: 2),
         if (cityName != null) ...[
           // The human-readable place name leads — the reason this card
           // exists — with the exact fix retained underneath, not dropped.
           Text(
             cityName!,
-            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: SentriColors.textPrimary),
+            style: SentriText.body.copyWith(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 1),
           Text(
             coordinates,
-            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: SentriColors.textMuted),
+            style: SentriText.caption.copyWith(fontWeight: FontWeight.w500),
           ),
         ] else
           // No resolved place name yet (or the device's geocoder failed) —
@@ -532,12 +519,12 @@ class _LocationCard extends StatelessWidget {
           // take the primary line rather than the card showing nothing.
           Text(
             coordinates,
-            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: SentriColors.textPrimary),
+            style: SentriText.body.copyWith(fontWeight: FontWeight.w600),
           ),
         const SizedBox(height: 2),
         Text(
           'Accuracy ±${accuracyMeters!.round()} m · ${_relativeTime(capturedAt!)}',
-          style: const TextStyle(fontSize: 12, color: SentriColors.textMuted),
+          style: SentriText.caption,
         ),
       ],
     );
@@ -574,69 +561,58 @@ class _RecentActivitySection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // `stretch`, not `start` — the header `Row` fills full width regardless
+    // (it has an `Expanded` title), but the card below it has nothing
+    // forcing its own width, so under `.start` it was shrink-wrapping to
+    // its content and left-aligning instead of matching the header's
+    // width, same as every other card container in this app.
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text(
-              'Recent activity',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: SentriColors.textPrimary),
-            ),
-            TextButton(
-              onPressed: onSeeAll,
-              style: TextButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                minimumSize: const Size(44, 44),
-                foregroundColor: SentriColors.primaryRed,
-              ),
-              child: const Text(
-                'See all',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+            const Expanded(
+              child: Text(
+                'Recent activity',
+                style: SentriText.h3,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
+            // No local style override — the app-wide `textButtonTheme`
+            // (Cosmos Blue, 44×44 minimum, weight 600) already gives this
+            // exactly the treatment it used to hand-roll here, so red
+            // doesn't leak into an ordinary navigation action.
+            TextButton(onPressed: onSeeAll, child: const Text('See all')),
           ],
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: SentriSpacing.xs),
         if (sosSentAt == null) const _EmptyActivityState() else _buildActivityRow(),
       ],
     );
   }
 
   Widget _buildActivityRow() {
-    return Material(
-      color: SentriColors.surface,
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              const Icon(LucideIcons.fileText, size: 20, color: SentriColors.textMuted),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Manual SOS',
-                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: SentriColors.textPrimary),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '$_statusLabel · ${_relativeTime(sosSentAt!)}',
-                      style: const TextStyle(fontSize: 12, color: SentriColors.textMuted),
-                    ),
-                  ],
+    return SentriCard(
+      onTap: onTap,
+      child: Row(
+        children: [
+          const Icon(LucideIcons.fileText, size: 20, color: SentriColors.textMuted),
+          const SizedBox(width: SentriSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Manual SOS',
+                  style: SentriText.bodySmall.copyWith(fontWeight: FontWeight.w500),
                 ),
-              ),
-              const Icon(LucideIcons.chevronRight, size: 20, color: SentriColors.textMuted),
-            ],
+                const SizedBox(height: 2),
+                Text('$_statusLabel · ${_relativeTime(sosSentAt!)}', style: SentriText.caption),
+              ],
+            ),
           ),
-        ),
+          const Icon(LucideIcons.chevronRight, size: 20, color: SentriColors.textMuted),
+        ],
       ),
     );
   }
@@ -647,26 +623,23 @@ class _EmptyActivityState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: SentriColors.surface,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: const Column(
+    // Same padding as the populated activity row (`SentriCard`'s own
+    // default, `lg`/16) rather than the larger `xl`/24 "section" padding
+    // this previously used — at 24px, with only an icon and two short
+    // lines inside, the card read as an oversized, mostly-empty box next
+    // to the denser Location/Safety cards above it.
+    return SentriCard(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(LucideIcons.fileText, size: 28, color: SentriColors.textMuted),
-          SizedBox(height: 10),
-          Text(
-            'No recent alerts',
-            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: SentriColors.textPrimary),
-          ),
-          SizedBox(height: 4),
+          const Icon(LucideIcons.fileText, size: 24, color: SentriColors.textMuted),
+          const SizedBox(height: SentriSpacing.sm),
+          Text('No recent alerts', style: SentriText.bodySmall.copyWith(fontWeight: FontWeight.w600)),
+          const SizedBox(height: SentriSpacing.xs),
           Text(
             'Your reported incidents will appear here.',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 13, color: SentriColors.textMuted, height: 1.4),
+            style: SentriText.bodySmall.copyWith(color: SentriColors.textMuted),
           ),
         ],
       ),

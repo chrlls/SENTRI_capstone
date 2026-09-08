@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 
-import '../theme/sentri_colors.dart';
+import '../theme/sentri_text.dart';
+import 'sentri_card.dart';
 
 /// One on/off preference row, shared by the Notifications and
 /// Privacy & Security preview screens. Visual match for the Profile
-/// tab's other rows (surface fill, 14px radius). The switch's "on"
-/// colour comes from the theme's `colorScheme.primary`
-/// (`SentriColors.primaryRed`), so it needs no explicit override.
+/// tab's other rows via [SentriCard]. The switch's on/off colours and
+/// non-colour "checked" icon come from the theme's `switchTheme`
+/// (`theme/sentri_theme.dart`) — this widget needs no explicit override.
 class SettingToggleTile extends StatelessWidget {
   final String title;
   final String? subtitle;
@@ -23,35 +24,17 @@ class SettingToggleTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // A `Material` (not a plain `Container`) so the wrapped `SwitchListTile`
-    // has a same-colour Material ancestor — otherwise Flutter warns that
-    // its ink splashes may be invisible — and so the ripple clips to the
-    // rounded corners. Mirrors `_ProfileRow` in `profile_screen.dart`.
-    return Material(
-      color: SentriColors.surface,
-      borderRadius: BorderRadius.circular(14),
-      clipBehavior: Clip.antiAlias,
+    // No `onTap` on the card itself — `SwitchListTile` already handles the
+    // whole-row tap and its own ripple; `SentriCard` here only supplies
+    // the shared surface/border/radius.
+    return SentriCard(
+      padding: EdgeInsets.zero,
       child: SwitchListTile(
         value: value,
         onChanged: onChanged,
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        title: Text(
-          title,
-          style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
-            color: SentriColors.textPrimary,
-          ),
-        ),
-        subtitle: subtitle == null
-            ? null
-            : Text(
-                subtitle!,
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: SentriColors.textMuted,
-                ),
-              ),
+        title: Text(title, style: SentriText.bodySmall.copyWith(fontWeight: FontWeight.w500)),
+        subtitle: subtitle == null ? null : Text(subtitle!, style: SentriText.caption),
       ),
     );
   }

@@ -5,6 +5,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../theme/sentri_colors.dart';
 import 'hold_to_confirm_sos_button.dart';
+import 'sos_reveal/sos_reveal_binding.dart';
 
 // ── Layout constants ───────────────────────────────────────────────────
 // The app has no spacing scale yet (still an open gap). These inline
@@ -20,8 +21,9 @@ const double _barBorderWidth = 1;
 /// Visible red disc diameter of the integrated SOS button.
 const double _sosDiscDiameter = 74;
 
-/// [HoldToConfirmSosButton]'s intrinsic canvas is `220` disc + `140` halo
-/// padding = `360`. To land a `_sosDiscDiameter` disc on screen the
+/// [HoldToConfirmSosButton]'s intrinsic canvas is a `220` disc centred in a
+/// `360` square (the extra margin is reserved, unpainted space — there is
+/// no halo drawn into it). To land a `_sosDiscDiameter` disc on screen the
 /// FittedBox target is that same ratio.
 const double _sosCanvasSize = _sosDiscDiameter * 360 / 220;
 
@@ -100,9 +102,11 @@ double floatingNavBarContentInset(BuildContext context) =>
 /// `Stopwatch` + `Ticker` + `Listener` hold gate (reduced-motion-safe,
 /// Decision 31 Open Item A), same `holdDuration` default (2500ms), same
 /// milestone haptics and progress fill; only the idle centre label is
-/// overridden to "SOS" and the decorative halo is turned off. An outer
-/// [Listener] adds the tap-vs-hold split: a short press that never became
-/// a hold opens the SOS screen; a completed hold fires an SOS in place.
+/// overridden to "SOS". An outer [Listener] adds the tap-vs-hold split: a
+/// short press that never became a hold opens the SOS screen; a completed
+/// hold fires the SOS and pushes the SOS screen behind the emergency
+/// reveal (`SosRevealBinding`), which dissolves to reveal it already in
+/// its Sending state.
 class FloatingNavBar extends StatefulWidget {
   final int currentIndex;
   final ValueChanged<int> onSelect;
@@ -191,8 +195,13 @@ class _FloatingNavBarState extends State<FloatingNavBar> {
             height: painterHeight,
             child: CustomPaint(
               painter: _SocketedPillPainter(
-                fill: SentriColors.background,
-                border: SentriColors.textMuted.withValues(alpha: 0.14),
+                // `surface` (white), not `background` — the app
+                // background is now off-white (design doc §2.1's
+                // surface-inversion), so the pill needs its own distinct
+                // fill to still read as a raised component rather than
+                // disappearing into the page.
+                fill: SentriColors.surface,
+                border: SentriColors.border,
                 borderWidth: _barBorderWidth,
                 shadow: SentriColors.textPrimary.withValues(alpha: 0.12),
                 shadowBlur: _pillShadowBlur,
@@ -273,22 +282,31 @@ class _FloatingNavBarState extends State<FloatingNavBar> {
                   onPointerDown: _onSosPointerDown,
                   onPointerUp: _onSosPointerUp,
                   onPointerCancel: (_) => _sosPressStart = null,
-                  child: SizedBox(
-                    width: _sosCanvasSize,
-                    height: _sosCanvasSize,
-                    child: FittedBox(
-                      fit: BoxFit.contain,
-                      child: HoldToConfirmSosButton(
-                        phase: widget.sosPhase,
-                        idleLabel: 'SOS',
-                        idleLabelStyle: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 54,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.5,
+                  child: SosRevealBinding(
+                    // A quick tap opens the SOS screen instead — the reveal
+                    // must never flash for a press this short.
+                    startDelay: _tapMaxDuration,
+                    onHoldComplete: _onSosHoldComplete,
+                    builder: (context, anchorKey, hooks) => SizedBox(
+                      key: anchorKey,
+                      width: _sosCanvasSize,
+                      height: _sosCanvasSize,
+                      child: FittedBox(
+                        fit: BoxFit.contain,
+                        child: HoldToConfirmSosButton(
+                          phase: widget.sosPhase,
+                          idleLabel: 'SOS',
+                          idleLabelStyle: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 54,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.5,
+                          ),
+                          onHoldStart: hooks.onHoldStart,
+                          onHoldProgress: hooks.onHoldProgress,
+                          onHoldCancel: hooks.onHoldCancel,
+                          onHoldComplete: hooks.onHoldComplete,
                         ),
-                        showHalo: false,
-                        onHoldComplete: _onSosHoldComplete,
                       ),
                     ),
                   ),

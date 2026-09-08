@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/auth_provider.dart';
+import '../widgets/sentri_submit_button.dart';
 import 'login_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -80,7 +81,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 if (auth.errorMessage != null) ...[
                   Text(
                     auth.errorMessage!,
-                    style: TextStyle(color: Theme.of(context).colorScheme.error),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -132,15 +136,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ),
                   ),
                 const SizedBox(height: 24),
-                FilledButton(
-                  onPressed: auth.isWorking ? null : _handleRegister,
-                  child: auth.isWorking
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('Register'),
+                SentriSubmitButton(
+                  label: 'Register',
+                  loading: auth.isWorking,
+                  onPressed: _handleRegister,
                 ),
                 TextButton(
                   onPressed: auth.isWorking

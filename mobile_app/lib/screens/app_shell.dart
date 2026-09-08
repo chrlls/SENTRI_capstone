@@ -5,6 +5,8 @@ import 'package:provider/provider.dart';
 import '../controllers/sos_controller.dart';
 import '../providers/auth_provider.dart';
 import '../theme/sentri_colors.dart';
+import '../theme/sentri_text.dart';
+import '../theme/sentri_tokens.dart';
 import '../widgets/floating_nav_bar.dart';
 import '../widgets/hold_to_confirm_sos_button.dart' show SosButtonPhase;
 import 'home_screen.dart';
@@ -18,14 +20,17 @@ import 'sos_screen.dart';
 ///
 /// Owns tab switching between Home and Profile (an [IndexedStack] so tab
 /// state is kept) and the floating notched nav bar with its persistent
-/// SOS button. `SosScreen` is pushed *on top* of this shell, so the bar
-/// is intentionally not visible while it is open — it is its own focused
-/// destination, not a tab.
+/// SOS button. `SosScreen` is pushed *on top* of this shell — by a tap, or
+/// by a completed hold — so the bar is intentionally not visible while it
+/// is open; it is its own focused destination, not a tab.
 ///
 /// Decision 05 / Decision 28 point 5: a held SOS from the nav bar calls
 /// straight into [SosController.fireManualSos] — the same call `SosScreen`
 /// makes — and nothing is awaited before the hold gesture itself can
-/// begin (the gesture lives entirely in [HoldToConfirmSosButton]).
+/// begin (the gesture lives entirely in [HoldToConfirmSosButton]). The
+/// push into `SosScreen` that follows happens behind the (purely
+/// decorative) emergency-reveal layer — see `SosRevealHost` — and is not
+/// itself part of that safety guarantee.
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
 
@@ -47,6 +52,12 @@ class _AppShellState extends State<AppShell> {
     context.read<SosController>().fireManualSos(
           token: context.read<AuthProvider>().token,
         );
+    // Push the SOS screen straight away, behind the still-covering
+    // emergency reveal (see `SosRevealBinding`/`SosRevealHost`) — by the
+    // time that layer dissolves a few hundred ms later, this screen has
+    // already run its own initState/GPS-status check and laid out once,
+    // so nothing jank-inducing happens at the moment it becomes visible.
+    _openSosScreen();
   }
 
   @override
@@ -108,31 +119,24 @@ class _SosHoldErrorBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // This reports a *failed emergency send*, not an ordinary form
+    // warning — it takes the emergency/danger color (Crimson Blaze via
+    // `colorScheme.error`), not the generic caution amber.
+    final errorColor = Theme.of(context).colorScheme.error;
     return Semantics(
       liveRegion: true,
       container: true,
       child: Material(
         color: SentriColors.surfaceMuted,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(SentriRadius.lg),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
           child: Row(
             children: [
-              const Icon(
-                LucideIcons.circleAlert,
-                size: 20,
-                color: SentriColors.caution,
-              ),
-              const SizedBox(width: 12),
+              Icon(LucideIcons.circleAlert, size: 20, color: errorColor),
+              const SizedBox(width: SentriSpacing.md),
               Expanded(
-                child: Text(
-                  message,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: SentriColors.textPrimary,
-                    height: 1.3,
-                  ),
-                ),
+                child: Text(message, style: SentriText.bodySmall),
               ),
               TextButton(
                 onPressed: onDismiss,

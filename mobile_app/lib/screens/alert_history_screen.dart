@@ -7,6 +7,9 @@ import '../services/incident_status_store.dart'
     show IncidentLifecycle, isTerminalIncidentStatus, parseIncidentLifecycle;
 import '../services/sentri_api_client.dart';
 import '../theme/sentri_colors.dart';
+import '../theme/sentri_text.dart';
+import '../theme/sentri_tokens.dart';
+import '../widgets/sentri_status_pill.dart';
 
 enum _HistoryFilter { all, active, resolved }
 
@@ -143,26 +146,41 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: SentriColors.background,
-      appBar: AppBar(
-        title: const Text('Alert History'),
-        centerTitle: true,
-        backgroundColor: SentriColors.background,
-        foregroundColor: SentriColors.textPrimary,
-        elevation: 0,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      // No local color/elevation override — inherits the app-wide
+      // `appBarTheme` (`theme/sentri_theme.dart`) like every other screen,
+      // so it can't silently drift from a future theme change.
+      appBar: AppBar(title: const Text('Alert History'), centerTitle: true),
+      body: SafeArea(
+        child: AnimatedSwitcher(
+          // Purpose: prevents the jarring instant swap from spinner to
+          // content/error that every other loading state in this app still
+          // has — the one place in this migration that adds motion for a
+          // stated reason, not decoration. Collapses to instant under the
+          // OS reduced-motion setting, same as `AnimationController`-based
+          // motion elsewhere in this app — implicit animations don't get
+          // that for free, so it's checked explicitly.
+          duration: MediaQuery.of(context).disableAnimations
+              ? Duration.zero
+              : const Duration(milliseconds: 180),
+          child: _buildBody(),
+        ),
       ),
-      body: SafeArea(child: _buildBody()),
     );
   }
 
   Widget _buildBody() {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(
+        key: ValueKey('loading'),
+        child: CircularProgressIndicator(),
+      );
     }
 
     if (_error != null) {
       return ListView(
-        padding: const EdgeInsets.all(24),
+        key: const ValueKey('error'),
+        padding: const EdgeInsets.all(SentriSpacing.xl),
         children: [
           const SizedBox(height: 80),
           const Icon(
@@ -170,13 +188,13 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen> {
             size: 32,
             color: SentriColors.textMuted,
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: SentriSpacing.md),
           Text(
             _error!,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: SentriColors.textMuted, fontSize: 14),
+            style: SentriText.bodySmall.copyWith(color: SentriColors.textMuted),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: SentriSpacing.lg),
           Center(
             child: TextButton(onPressed: _load, child: const Text('Try again')),
           ),
@@ -187,6 +205,7 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen> {
     final filtered = _filtered;
 
     return RefreshIndicator(
+      key: const ValueKey('content'),
       onRefresh: _load,
       child: Column(
         children: [
@@ -202,14 +221,15 @@ class _AlertHistoryScreenState extends State<AlertHistoryScreen> {
                 ? ListView(
                     // Keeps pull-to-refresh working even when the list has
                     // nothing to show yet.
-                    padding: const EdgeInsets.all(24),
+                    padding: const EdgeInsets.all(SentriSpacing.xl),
                     children: const [SizedBox(height: 60), _EmptyHistoryState()],
                   )
                 : ListView.separated(
                     padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
                     itemCount: filtered.length,
-                    separatorBuilder: (_, _) =>
-                        const Divider(height: 1, color: SentriColors.surfaceMuted),
+                    // Inherits the app-wide `dividerTheme` (1px, the
+                    // shared border color) — no local override needed.
+                    separatorBuilder: (_, _) => const Divider(),
                     itemBuilder: (context, index) =>
                         _HistoryRow(entry: filtered[index]),
                   ),
@@ -232,7 +252,7 @@ class _FilterTabs extends StatelessWidget {
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
         color: SentriColors.surfaceMuted,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(SentriRadius.sm),
       ),
       child: Row(
         children: [
@@ -253,23 +273,28 @@ class _FilterTabs extends StatelessWidget {
     // view (nothing destructive), so trading a few px of height for a
     // visibly lighter control is the right call for this specific
     // control, unlike the safety-critical SOS button.
+    //
+    // This is a selection state, not an emergency action, so the
+    // selected fill is the app's non-emergency accent (Cosmos Blue), not
+    // Crimson Blaze — `InkWell`, not a bare `GestureDetector`, so it
+    // gives the same press feedback every other tappable row in the app
+    // does.
     return Expanded(
-      child: GestureDetector(
-        onTap: () => onSelect(value),
-        behavior: HitTestBehavior.opaque,
-        child: Container(
-          height: 36,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: isSelected ? SentriColors.primaryRed : Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Text(
-            label,
-            style: TextStyle(
-              color: isSelected ? Colors.white : SentriColors.textSecondary,
-              fontWeight: FontWeight.w600,
-              fontSize: 13,
+      child: Material(
+        color: isSelected ? SentriColors.info : Colors.transparent,
+        borderRadius: BorderRadius.circular(SentriRadius.sm),
+        child: InkWell(
+          onTap: () => onSelect(value),
+          borderRadius: BorderRadius.circular(SentriRadius.sm),
+          child: Container(
+            height: 36,
+            alignment: Alignment.center,
+            child: Text(
+              label,
+              style: SentriText.label.copyWith(
+                color: isSelected ? Colors.white : SentriColors.textSecondary,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ),
@@ -304,19 +329,12 @@ class _HistoryRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'SOS Alert',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: SentriColors.textPrimary,
-                  ),
+                  style: SentriText.bodySmall.copyWith(fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: 3),
-                Text(
-                  _formatAlertTimestamp(entry.createdAt),
-                  style: const TextStyle(fontSize: 13, color: SentriColors.textMuted),
-                ),
+                Text(_formatAlertTimestamp(entry.createdAt), style: SentriText.caption),
                 if (location != null) ...[
                   const SizedBox(height: 3),
                   Row(
@@ -332,7 +350,7 @@ class _HistoryRow extends StatelessWidget {
                         child: Text(
                           location,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 13, color: SentriColors.textMuted),
+                          style: SentriText.caption,
                         ),
                       ),
                     ],
@@ -341,18 +359,18 @@ class _HistoryRow extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(width: 12),
-          _StatusBadge(status: entry.status),
+          const SizedBox(width: SentriSpacing.md),
+          _StatusPillForLifecycle(status: entry.status),
         ],
       ),
     );
   }
 }
 
-class _StatusBadge extends StatelessWidget {
+class _StatusPillForLifecycle extends StatelessWidget {
   final IncidentLifecycle status;
 
-  const _StatusBadge({required this.status});
+  const _StatusPillForLifecycle({required this.status});
 
   @override
   Widget build(BuildContext context) {
@@ -375,17 +393,7 @@ class _StatusBadge extends StatelessWidget {
         accent = SentriColors.info;
         label = 'Active';
     }
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: accent.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(color: accent, fontSize: 12, fontWeight: FontWeight.w600),
-      ),
-    );
+    return SentriStatusPill(color: accent, label: label);
   }
 }
 
@@ -394,23 +402,16 @@ class _EmptyHistoryState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Column(
+    return Column(
       children: [
-        Icon(LucideIcons.clock, size: 32, color: SentriColors.textMuted),
-        SizedBox(height: 12),
-        Text(
-          'No alerts yet',
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-            color: SentriColors.textPrimary,
-          ),
-        ),
-        SizedBox(height: 4),
+        const Icon(LucideIcons.clock, size: 32, color: SentriColors.textMuted),
+        const SizedBox(height: SentriSpacing.md),
+        Text('No alerts yet', style: SentriText.bodySmall.copyWith(fontWeight: FontWeight.w600)),
+        const SizedBox(height: SentriSpacing.xs),
         Text(
           'Incidents you report will show up here.',
           textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 13, color: SentriColors.textMuted),
+          style: SentriText.caption,
         ),
       ],
     );

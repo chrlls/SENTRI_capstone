@@ -4,6 +4,9 @@ import 'package:provider/provider.dart';
 
 import '../services/emergency_contacts_store.dart';
 import '../theme/sentri_colors.dart';
+import '../theme/sentri_text.dart';
+import '../theme/sentri_tokens.dart';
+import '../widgets/sentri_card.dart';
 
 /// In-memory Emergency Contacts preview, reached from the Profile tab.
 /// Pushed on top of the app shell, so the floating nav bar is
@@ -30,10 +33,10 @@ class EmergencyContactsScreen extends StatelessWidget {
               child: contacts.isEmpty
                   ? const _EmptyState()
                   : ListView.separated(
-                      padding: const EdgeInsets.all(24),
+                      padding: const EdgeInsets.all(SentriSpacing.xl),
                       itemCount: contacts.length,
                       separatorBuilder: (context, index) =>
-                          const SizedBox(height: 12),
+                          const SizedBox(height: SentriSpacing.md),
                       itemBuilder: (context, index) => _ContactCard(
                         contact: contacts[index],
                         onRemove: () => context
@@ -43,7 +46,12 @@ class EmergencyContactsScreen extends StatelessWidget {
                     ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+              padding: const EdgeInsets.fromLTRB(
+                SentriSpacing.xl,
+                SentriSpacing.sm,
+                SentriSpacing.xl,
+                SentriSpacing.lg,
+              ),
               child: SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
@@ -69,22 +77,22 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
+    return Center(
       child: Padding(
-        padding: EdgeInsets.all(32),
+        padding: const EdgeInsets.all(SentriSpacing.xxl),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
+            const Icon(
               LucideIcons.contact,
               size: 40,
               color: SentriColors.textMuted,
             ),
-            SizedBox(height: 12),
+            const SizedBox(height: SentriSpacing.md),
             Text(
               'No emergency contacts added yet',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 14, color: SentriColors.textMuted),
+              style: SentriText.bodySmall.copyWith(color: SentriColors.textMuted),
             ),
           ],
         ),
@@ -102,12 +110,8 @@ class _ContactCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final relationship = contact.relationship;
-    return Container(
+    return SentriCard(
       padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
-      decoration: BoxDecoration(
-        color: SentriColors.surface,
-        borderRadius: BorderRadius.circular(14),
-      ),
       child: Row(
         children: [
           Expanded(
@@ -116,29 +120,13 @@ class _ContactCard extends StatelessWidget {
               children: [
                 Text(
                   contact.contactName,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: SentriColors.textPrimary,
-                  ),
+                  style: SentriText.bodySmall.copyWith(fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: 2),
-                Text(
-                  contact.contactPhone,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: SentriColors.textPrimary,
-                  ),
-                ),
+                Text(contact.contactPhone, style: SentriText.bodySmall),
                 if (relationship != null) ...[
                   const SizedBox(height: 2),
-                  Text(
-                    relationship,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: SentriColors.textMuted,
-                    ),
-                  ),
+                  Text(relationship, style: SentriText.caption),
                 ],
               ],
             ),
@@ -213,7 +201,7 @@ class _AddEmergencyContactScreenState extends State<AddEmergencyContactScreen> {
       appBar: AppBar(title: const Text('Add contact')),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(SentriSpacing.xl),
           child: Form(
             key: _formKey,
             child: Column(
@@ -227,7 +215,7 @@ class _AddEmergencyContactScreenState extends State<AddEmergencyContactScreen> {
                       ? 'Name is required.'
                       : null,
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: SentriSpacing.lg),
                 TextFormField(
                   controller: _phoneController,
                   decoration: const InputDecoration(labelText: 'Phone number'),
@@ -236,7 +224,7 @@ class _AddEmergencyContactScreenState extends State<AddEmergencyContactScreen> {
                       ? 'Phone number is required.'
                       : null,
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: SentriSpacing.lg),
                 TextFormField(
                   controller: _relationshipController,
                   decoration: const InputDecoration(
@@ -244,7 +232,7 @@ class _AddEmergencyContactScreenState extends State<AddEmergencyContactScreen> {
                   ),
                   textCapitalization: TextCapitalization.words,
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: SentriSpacing.xl),
                 FilledButton(
                   onPressed: _canSubmit ? _submit : null,
                   child: const Text('Add contact'),

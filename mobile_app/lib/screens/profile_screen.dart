@@ -7,7 +7,11 @@ import '../services/emergency_contacts_store.dart';
 import '../services/incident_status_store.dart';
 import '../services/sentri_api_client.dart' show SentriUser;
 import '../theme/sentri_colors.dart';
+import '../theme/sentri_text.dart';
+import '../theme/sentri_tokens.dart';
 import '../widgets/floating_nav_bar.dart';
+import '../widgets/sentri_card.dart';
+import '../widgets/sentri_status_pill.dart';
 import 'emergency_contacts_screen.dart';
 import 'login_screen.dart';
 import 'notifications_screen.dart';
@@ -51,17 +55,17 @@ class ProfileScreen extends StatelessWidget {
         bottom: false,
         child: SingleChildScrollView(
           padding: EdgeInsets.fromLTRB(
-            24,
-            24,
-            24,
+            SentriSpacing.xl,
+            SentriSpacing.xl,
+            SentriSpacing.xl,
             floatingNavBarContentInset(context),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const SizedBox(height: 8),
+              const SizedBox(height: SentriSpacing.sm),
               _AccountHeader(user: user),
-              const SizedBox(height: 28),
+              const SizedBox(height: SentriSpacing.xl + SentriSpacing.xs),
               _ProfileRow(
                 icon: LucideIcons.contact,
                 label: 'Emergency Contacts',
@@ -74,7 +78,7 @@ class ProfileScreen extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: SentriSpacing.md),
               _ProfileRow(
                 icon: LucideIcons.bell,
                 label: 'Notifications',
@@ -84,7 +88,7 @@ class ProfileScreen extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: SentriSpacing.md),
               _ProfileRow(
                 icon: LucideIcons.lock,
                 label: 'Privacy & Security',
@@ -94,12 +98,16 @@ class ProfileScreen extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: SentriSpacing.md),
+              // Deliberately styled the same as every other row — SENTRI's
+              // emergency red is reserved for the SOS control, so a red
+              // row here would read as the wrong kind of urgent (design
+              // doc §8's "don't automatically make every destructive-
+              // looking action Crimson Blaze" rule). Behaviour unchanged:
+              // signs out immediately, no confirmation.
               _ProfileRow(
                 icon: LucideIcons.logOut,
                 label: 'Sign Out',
-                labelColor: SentriColors.primaryRed,
-                iconColor: SentriColors.primaryRed,
                 onTap: () => _handleSignOut(context),
               ),
             ],
@@ -134,29 +142,22 @@ class _AccountHeader extends StatelessWidget {
             color: SentriColors.textMuted,
           ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: SentriSpacing.lg),
         Text(
           fullName.isEmpty ? 'Signed in' : fullName,
           textAlign: TextAlign.center,
-          style: const TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-            color: SentriColors.textPrimary,
-          ),
+          style: SentriText.h3,
         ),
         if (email.isNotEmpty) ...[
-          const SizedBox(height: 4),
+          const SizedBox(height: SentriSpacing.xs),
           Text(
             email,
             textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 14,
-              color: SentriColors.textMuted,
-            ),
+            style: SentriText.bodySmall.copyWith(color: SentriColors.textMuted),
           ),
         ],
-        const SizedBox(height: 12),
-        _StatusBadge(status: user?.status ?? ''),
+        const SizedBox(height: SentriSpacing.md),
+        _StatusPillForStatus(status: user?.status ?? ''),
       ],
     );
   }
@@ -166,10 +167,10 @@ class _AccountHeader extends StatelessWidget {
 /// enum from `schema.sql`). Only `active` reads as "Verified"; every
 /// other state — including an unrecognised one — shows its own literal
 /// label and never claims verification.
-class _StatusBadge extends StatelessWidget {
+class _StatusPillForStatus extends StatelessWidget {
   final String status;
 
-  const _StatusBadge({required this.status});
+  const _StatusPillForStatus({required this.status});
 
   @override
   Widget build(BuildContext context) {
@@ -201,28 +202,7 @@ class _StatusBadge extends StatelessWidget {
       ),
     };
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: spec.color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(spec.icon, size: 14, color: spec.color),
-          const SizedBox(width: 6),
-          Text(
-            spec.label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: spec.color,
-            ),
-          ),
-        ],
-      ),
-    );
+    return SentriStatusPill(color: spec.color, label: spec.label, icon: spec.icon);
   }
 }
 
@@ -230,8 +210,6 @@ class _ProfileRow extends StatelessWidget {
   final IconData icon;
   final String label;
   final String? subtitle;
-  final Color? labelColor;
-  final Color? iconColor;
   final VoidCallback onTap;
 
   const _ProfileRow({
@@ -239,57 +217,34 @@ class _ProfileRow extends StatelessWidget {
     required this.label,
     required this.onTap,
     this.subtitle,
-    this.labelColor,
-    this.iconColor,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: SentriColors.surface,
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Icon(icon, size: 20, color: iconColor ?? SentriColors.textMuted),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      label,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        color: labelColor ?? SentriColors.textPrimary,
-                      ),
-                    ),
-                    if (subtitle != null) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        subtitle!,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: SentriColors.textMuted,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              const Icon(
-                LucideIcons.chevronRight,
-                size: 20,
-                color: SentriColors.textMuted,
-              ),
-            ],
+    return SentriCard(
+      onTap: onTap,
+      child: Row(
+        children: [
+          Icon(icon, size: 20, color: SentriColors.textMuted),
+          const SizedBox(width: SentriSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: SentriText.bodySmall.copyWith(fontWeight: FontWeight.w500)),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 2),
+                  Text(subtitle!, style: SentriText.caption),
+                ],
+              ],
+            ),
           ),
-        ),
+          const Icon(
+            LucideIcons.chevronRight,
+            size: 20,
+            color: SentriColors.textMuted,
+          ),
+        ],
       ),
     );
   }

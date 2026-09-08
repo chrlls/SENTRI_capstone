@@ -8,7 +8,8 @@ import 'services/emergency_contacts_store.dart';
 import 'services/incident_status_store.dart';
 import 'services/notification_preferences_store.dart';
 import 'services/privacy_preferences_store.dart';
-import 'theme/sentri_colors.dart';
+import 'theme/sentri_theme.dart';
+import 'widgets/sos_reveal/sos_reveal_host.dart';
 
 void main() {
   runApp(const SentriApp());
@@ -59,47 +60,15 @@ class SentriApp extends StatelessWidget {
       child: MaterialApp(
         title: 'SENTRI',
         debugShowCheckedModeBanner: false,
-        // Explicit ColorScheme/component themes, not just `colorSchemeSeed`:
-        // Material 3's seed-derived tonal palette picks a muted, darkened
-        // tone for `primary` in light mode rather than the literal accent
-        // hex (confirmed by rendering it — the seed alone produced a dull
-        // brownish button, not SentriColors.primaryRed), and would also
-        // tint the AppBar's surface a pale pink instead of the intended
-        // near-white. Pinning these explicitly is what actually makes "red
-        // as the sole accent color" true on screen, not just in the seed
-        // value.
-        theme: ThemeData(
-          useMaterial3: true,
-          brightness: Brightness.light,
-          scaffoldBackgroundColor: SentriColors.background,
-          colorScheme:
-              ColorScheme.fromSeed(
-                seedColor: SentriColors.primaryRed,
-                brightness: Brightness.light,
-              ).copyWith(
-                primary: SentriColors.primaryRed,
-                onPrimary: Colors.white,
-                surface: SentriColors.background,
-                onSurface: SentriColors.textPrimary,
-                error: SentriColors.caution,
-              ),
-          appBarTheme: const AppBarTheme(
-            backgroundColor: SentriColors.background,
-            foregroundColor: SentriColors.textPrimary,
-            elevation: 0,
-          ),
-          filledButtonTheme: FilledButtonThemeData(
-            style: FilledButton.styleFrom(
-              backgroundColor: SentriColors.primaryRed,
-              foregroundColor: Colors.white,
-            ),
-          ),
-          textButtonTheme: TextButtonThemeData(
-            style: TextButton.styleFrom(
-              foregroundColor: SentriColors.primaryRed,
-            ),
-          ),
-        ),
+        // Hosts the SOS emergency-reveal overlay above the Navigator, so a
+        // hold that started on one screen and hands off into `SosScreen`
+        // can never be orphaned by the route push in between. Purely
+        // decorative — see SosRevealHost's own doc comment.
+        builder: (context, child) => SosRevealHost(child: child!),
+        // Centralised in `theme/sentri_theme.dart` — see its own doc
+        // comment for why `colorScheme.primary` is Cosmos Blue, not the
+        // emergency red.
+        theme: SentriTheme.light(),
         home: const LoginScreen(),
       ),
     );

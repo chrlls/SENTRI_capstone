@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../services/notification_preferences_store.dart';
+import '../theme/sentri_tokens.dart';
 import '../widgets/setting_toggle_tile.dart';
 
 /// In-memory Notifications preferences preview, reached from the Profile
@@ -24,7 +25,7 @@ class NotificationsScreen extends StatelessWidget {
       appBar: AppBar(title: const Text('Notifications')),
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(SentriSpacing.xl),
           children: [
             SettingToggleTile(
               title: 'Incident status updates',
@@ -32,14 +33,14 @@ class NotificationsScreen extends StatelessWidget {
               value: prefs.incidentStatusUpdates,
               onChanged: (value) => prefs.incidentStatusUpdates = value,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: SentriSpacing.md),
             SettingToggleTile(
               title: 'Emergency contact alerts',
               subtitle: 'Notify me when my emergency contacts are contacted',
               value: prefs.emergencyContactAlerts,
               onChanged: (value) => prefs.emergencyContactAlerts = value,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: SentriSpacing.md),
             SettingToggleTile(
               title: 'System announcements',
               subtitle: 'Service updates and maintenance notices',

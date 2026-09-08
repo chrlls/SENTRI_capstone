@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../services/privacy_preferences_store.dart';
+import '../theme/sentri_tokens.dart';
 import '../widgets/setting_toggle_tile.dart';
 
 /// In-memory Privacy & Security preferences preview, reached from the
@@ -25,7 +26,7 @@ class PrivacySecurityScreen extends StatelessWidget {
       appBar: AppBar(title: const Text('Privacy & Security')),
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(SentriSpacing.xl),
           children: [
             SettingToggleTile(
               title: 'Share precise location with responders',
@@ -34,7 +35,7 @@ class PrivacySecurityScreen extends StatelessWidget {
               onChanged: (value) =>
                   prefs.sharePreciseLocationWithResponders = value,
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: SentriSpacing.md),
             SettingToggleTile(
               title: 'Allow diagnostics reports',
               subtitle: 'Share anonymous crash and performance data',
