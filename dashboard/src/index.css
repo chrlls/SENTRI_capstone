@@ -107,6 +107,91 @@
     --sidebar-ring: oklch(0.62 0.17 250);
 }
 
+/*
+ * Admin Dashboard brand scope (SENTRI Visual Identity Guidelines v2,
+ * `Brand/brand_design`) — a light-surface theme isolated to `.admin-theme`
+ * so it never touches the dispatcher console's own dark palette (Decision
+ * 23) even though both share the same shadcn component library and the
+ * same semantic token names. Radius/shadow scales are inherited unchanged
+ * (the existing `--radius` chain already yields exactly 14px at `rounded-xl`,
+ * the brand's container radius); only color and font tokens are overridden
+ * here. `--sentri-*` are the raw brand hexes, for the handful of places
+ * (active-nav accent, status dots) that need the literal brand color rather
+ * than a semantic role.
+ */
+.admin-theme {
+    color-scheme: light;
+    --font-sans: 'Archivo', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace;
+    --background: #F7F7F5;
+    --foreground: #0E2632;
+    --card: #FFFFFF;
+    --card-foreground: #0E2632;
+    --popover: #FFFFFF;
+    --popover-foreground: #0E2632;
+    --primary: #0E2632;
+    --primary-foreground: #F7F7F5;
+    --secondary: #EFEEE9;
+    --secondary-foreground: #0E2632;
+    --muted: #EFEEE9;
+    --muted-foreground: #5C6E76;
+    --accent: #EFEEE9;
+    --accent-foreground: #0E2632;
+    --destructive: #EB1B1D;
+    --border: rgba(14, 38, 50, 0.12);
+    --input: rgba(14, 38, 50, 0.18);
+    --ring: rgba(14, 38, 50, 0.4);
+    --sentri-crimson: #EB1B1D;
+    --sentri-obsidian: #0E2632;
+    --sentri-slate-body: #3E535C;
+    --sentri-slate-label: #5C6E76;
+    --sentri-obsidian-tint: #9FB2BA;
+    /*
+     * The sidebar rail is Blue Obsidian, not the light content surface
+     * above — the brand's own dark-ground pairing (Visual Identity
+     * Guidelines §05), reusing the `--sidebar-*` token family this
+     * project's shadcn setup already scaffolds (see the dispatcher
+     * `:root` block above) rather than inventing a parallel one.
+     */
+    --sidebar: #021D2C;
+    --sidebar-foreground: #F7F7F5;
+    --sidebar-primary: #EB1B1D;
+    --sidebar-primary-foreground: #F7F7F5;
+    --sidebar-accent: rgba(247, 247, 245, 0.08);
+    --sidebar-accent-foreground: #F7F7F5;
+    --sidebar-border: rgba(247, 247, 245, 0.1);
+    --sidebar-ring: rgba(247, 247, 245, 0.4);
+    /*
+     * KPI cards (StatBlock) float on this shadow instead of a ring/border
+     * — tinted to Blue Obsidian rather than pure black (design-taste-
+     * frontend's own shadow rule: tint shadows to the background hue on
+     * light surfaces), and named as one reusable token rather than an
+     * inline arbitrary value so any other "floating" surface can share it
+     * later without re-deriving the values.
+     */
+    --shadow-admin-card: 0 1px 2px rgba(14, 38, 50, 0.04), 0 8px 24px rgba(14, 38, 50, 0.08);
+    /*
+     * shadcn's chart.jsx (dashboard/src/components/ui/chart.jsx) reads
+     * --chart-1..5 to color series that don't set an explicit config
+     * color. The dispatcher `:root` theme above already defines these
+     * (dark-tuned grays for its own dark chrome); without overriding them
+     * here, Admin's charts would silently inherit that palette instead of
+     * SENTRI's brand. A 5-step monochrome ramp from Blue Obsidian to the
+     * obsidian tint, deliberately excluding Crimson Blaze — charts are
+     * descriptive, not urgent, and crimson stays reserved for the
+     * dispatcher console's real, human-verified active alerts (see
+     * StatBlock.jsx's TREND_TONE_STYLES.caution for the same reasoning
+     * applied to the KPI row).
+     */
+    --chart-1: #0E2632;
+    --chart-2: #2E4650;
+    --chart-3: #3E535C;
+    --chart-4: #5C6E76;
+    --chart-5: #9FB2BA;
+    background: var(--background);
+    color: var(--foreground);
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

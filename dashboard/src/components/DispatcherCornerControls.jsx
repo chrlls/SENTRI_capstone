@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom'
-import { LogOut, UserPlus } from 'lucide-react'
+import { LayoutDashboard, LogOut, UserPlus } from 'lucide-react'
 import { useAuth } from '@/hooks/use-auth'
 import { useConnectionStatus } from '@/hooks/useConnectionStatus'
 import { Badge } from '@/components/ui/badge'
@@ -90,11 +90,18 @@ export function DispatcherCornerControls() {
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
           {user.role === 'admin' && (
-            <DropdownMenuItem asChild>
-              <Link to="/admin/create-dispatcher">
-                <UserPlus /> Create dispatcher
-              </Link>
-            </DropdownMenuItem>
+            <>
+              <DropdownMenuItem asChild>
+                <Link to="/admin">
+                  <LayoutDashboard /> Admin Dashboard
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link to="/admin/create-dispatcher">
+                  <UserPlus /> Create dispatcher
+                </Link>
+              </DropdownMenuItem>
+            </>
           )}
           <DropdownMenuItem variant="destructive" onClick={handleLogout}>
             <LogOut /> Sign out
