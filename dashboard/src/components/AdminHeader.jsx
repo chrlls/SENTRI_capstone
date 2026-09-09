@@ -5,7 +5,6 @@ import { useAuth } from '@/hooks/use-auth'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Badge } from '@/components/ui/badge'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,10 +32,10 @@ export function AdminHeader() {
   const [searchValue, setSearchValue] = useState('')
 
   return (
-    <div className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-background px-4 lg:px-8">
+    <div className="flex h-16 shrink-0 items-center gap-3 border-b border-border bg-[#FFFEFF] px-4 lg:px-8">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="icon" className="shrink-0 rounded-[3px] md:hidden" aria-label="Open admin navigation">
+          <Button variant="outline" size="icon" className="shrink-0 rounded-full md:hidden" aria-label="Open admin navigation">
             <Menu />
           </Button>
         </DropdownMenuTrigger>
@@ -46,11 +45,6 @@ export function AdminHeader() {
               <Link to={item.path} className="flex items-center gap-2">
                 <item.icon className="size-4" />
                 {item.label}
-                {item.comingSoon && (
-                  <Badge variant="outline" className="ml-auto">
-                    Soon
-                  </Badge>
-                )}
               </Link>
             </DropdownMenuItem>
           ))}
@@ -65,15 +59,15 @@ export function AdminHeader() {
           onChange={(event) => setSearchValue(event.target.value)}
           placeholder="Search anything..."
           aria-label="Search"
-          className="h-9 rounded-[14px] pl-9"
+          className="h-10 rounded-full pl-9"
         />
       </div>
 
       <div className="ml-auto flex shrink-0 items-center gap-1.5">
-        <Button variant="ghost" size="icon" className="rounded-[3px]" aria-label="Toggle color theme" title="Color theme (coming soon)">
+        <Button variant="ghost" size="icon" className="rounded-full" aria-label="Toggle color theme" title="Color theme (coming soon)">
           <Moon />
         </Button>
-        <Button variant="ghost" size="icon" className="rounded-[3px]" aria-label="Notifications" title="Notifications (coming soon)">
+        <Button variant="ghost" size="icon" className="rounded-full" aria-label="Notifications" title="Notifications (coming soon)">
           <Bell />
         </Button>
         <Avatar title={user.full_name}>

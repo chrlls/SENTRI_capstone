@@ -3,54 +3,59 @@ import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 
 /**
- * Trend pill color is keyed by sentiment (`tone`), not by arrow direction
- * — an increase isn't automatically good news (more pending verifications
- * is bad even though the arrow points up), so the two stay independent
- * signals. See adminMockData.js's own header comment for the full
- * reasoning per card. `caution` deliberately uses Tailwind's built-in
- * amber, not Crimson Blaze — crimson is reserved for the dispatcher
- * console's real, human-verified active alerts; reusing it here for "a
- * backlog grew" would dilute that meaning across the product.
+ * Trend-indicator colour is keyed by sentiment (`tone`), not by arrow
+ * direction — an increase isn't automatically good news, so the two stay
+ * independent. `positive` uses SENTRI blue; `caution` (the number moved
+ * against the metric's favourable direction — e.g. the false-alarm rate
+ * climbing) uses the brand red, the one place red is allowed on the KPI
+ * row; `neutral` stays muted for a metric with no inherently good
+ * direction (Incidents Today). This red is distinct in meaning from the
+ * dispatcher console's active-alert crimson: here it just flags a KPI
+ * trending the wrong way, not a live incident.
  */
 const TREND_TONE_STYLES = {
-  positive: 'bg-emerald-50 text-emerald-700',
-  caution: 'bg-amber-50 text-amber-700',
-  neutral: 'bg-(--sentri-slate-label)/10 text-(--sentri-slate-label)',
+  positive: 'text-[#1362FE]',
+  caution: 'text-destructive',
+  neutral: 'text-muted-foreground',
 }
 
 /**
- * KPI card primitive — label + icon on top, a large value, and a single
- * colored trend pill combining the delta and the comparison period (e.g.
- * "9.9% vs last month") rather than a separate plain-text caption line.
- * Borderless by design (`ring-0`, `--shadow-admin-card` instead) so the
- * card reads as floating above the page rather than boxed — index.css's
- * own comment on that token explains why it's tinted to the brand's
- * obsidian hue rather than a generic black shadow.
+ * KPI card — a muted label, one dominant value, and a compact
+ * "<trend arrow> <delta> vs <period>" line beneath it. White surface on a
+ * very light shadow (no border, `--shadow-admin-card`), 14px radius,
+ * generous padding. The slanted trend arrow matches the trigger-source
+ * mix panel; its colour is supplementary — the arrow carries direction,
+ * the number carries magnitude, and an aria-label spells the whole thing
+ * out.
  */
-export function StatBlock({ label, value, icon: Icon, trend, className }) {
-  return (
-    <Card className={cn('rounded-[14px] ring-0 shadow-(--shadow-admin-card)', className)}>
-      <CardContent className="flex flex-col gap-2.5">
-        <div className="flex items-center justify-between gap-2">
-          <span className="font-mono text-[11px] font-medium tracking-wide text-(--sentri-slate-label) uppercase">
-            {label}
-          </span>
-          {Icon && <Icon className="size-3.5 shrink-0 text-(--sentri-slate-label)" aria-hidden="true" />}
-        </div>
+export function StatBlock({ label, value, trend, className }) {
+  const TrendArrow = trend?.direction === 'up' ? TrendingUp : TrendingDown
 
-        <span className="font-heading text-2xl font-semibold text-foreground">{value}</span>
+  return (
+    <Card className={cn('rounded-[14px] ring-0 shadow-(--shadow-admin-card) [--card-spacing:--spacing(5)]', className)}>
+      <CardContent className="flex flex-col gap-3">
+        <span className="font-mono text-xs font-medium tracking-wide text-(--sentri-slate-label) uppercase">
+          {label}
+        </span>
+
+        <span className="font-heading text-[28px] leading-none font-semibold tracking-tight text-foreground tabular-nums">
+          {value}
+        </span>
 
         {trend && (
-          <span
-            title={trend.title}
-            className={cn(
-              'inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap',
-              TREND_TONE_STYLES[trend.tone]
-            )}
-          >
-            {trend.direction === 'up' ? <TrendingUp className="size-3" /> : <TrendingDown className="size-3" />}
-            {trend.deltaLabel} vs {trend.periodLabel}
-          </span>
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
+            <span
+              className={cn(
+                'inline-flex items-center gap-0.5 font-medium whitespace-nowrap tabular-nums',
+                TREND_TONE_STYLES[trend.tone]
+              )}
+              aria-label={`${trend.direction === 'up' ? 'Up' : 'Down'} ${trend.deltaLabel} versus ${trend.periodLabel}`}
+            >
+              <TrendArrow className="size-3" aria-hidden="true" />
+              {trend.deltaLabel}
+            </span>
+            <span className="text-muted-foreground">vs {trend.periodLabel}</span>
+          </div>
         )}
       </CardContent>
     </Card>

@@ -69,6 +69,30 @@ export function formatElapsed(totalSeconds) {
 }
 
 /**
+ * Decimal minutes -> a plain-language duration a non-statistician reads at
+ * a glance. Under an hour: "3m 42s" (whole seconds, no decimals). An hour
+ * or more: "1h 04m" (seconds dropped — that precision stops meaning
+ * anything at that scale). Used by the Admin dashboard's Time to Dispatch
+ * chart, where a bare "3.7" reads as an ambiguous number, not a duration.
+ */
+export function formatDurationMinutes(totalMinutes) {
+  if (totalMinutes === null || totalMinutes === undefined || Number.isNaN(totalMinutes)) {
+    return '—'
+  }
+
+  const totalSeconds = Math.round(totalMinutes * 60)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+
+  if (hours > 0) {
+    return `${hours}h ${String(minutes).padStart(2, '0')}m`
+  }
+
+  return `${minutes}m ${String(seconds).padStart(2, '0')}s`
+}
+
+/**
  * The API returns UTC timestamptz strings — a dispatcher working in Tagum
  * City needs Asia/Manila local time, not raw UTC, for anything read as a
  * wall-clock moment (location captured at, status history entries).

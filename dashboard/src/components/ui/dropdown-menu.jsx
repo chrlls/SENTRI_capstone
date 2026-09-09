@@ -28,8 +28,14 @@ function DropdownMenuContent({
   sideOffset = 4,
   ...props
 }) {
+  // Portal into the admin light-theme scope when the page has one, so the
+  // menu inherits its tokens rather than the dispatcher console's dark
+  // :root (a portal otherwise escapes to <body>). No-op elsewhere.
+  const themeScope =
+    typeof document !== "undefined" ? document.querySelector(".admin-theme") : null
+
   return (
-    <DropdownMenuPrimitive.Portal>
+    <DropdownMenuPrimitive.Portal container={themeScope ?? undefined}>
       <DropdownMenuPrimitive.Content
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}

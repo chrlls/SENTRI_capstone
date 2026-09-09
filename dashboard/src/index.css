@@ -147,20 +147,29 @@
     --sentri-slate-label: #5C6E76;
     --sentri-obsidian-tint: #9FB2BA;
     /*
-     * The sidebar rail is Blue Obsidian, not the light content surface
-     * above — the brand's own dark-ground pairing (Visual Identity
-     * Guidelines §05), reusing the `--sidebar-*` token family this
-     * project's shadcn setup already scaffolds (see the dispatcher
-     * `:root` block above) rather than inventing a parallel one.
+     * Light sidebar rail on a near-white surface — a deliberate departure
+     * from the Blue-Obsidian dark-ground rail in Visual Identity
+     * Guidelines §05, adopted per an explicit design direction to move the
+     * admin sidebar to a clean light treatment (near-white ground, dark
+     * ink labels, hairline separators, subtle tinted active pill). Still
+     * the same `--sidebar-*` token family the shadcn setup scaffolds, so
+     * every consumer (AdminSidebar) adapts without markup changes. The
+     * crimson `--sidebar-primary` is kept as the active-nav accent — the
+     * one literal brand colour on the rail. Every other value is
+     * re-derived for a light ground: white text would vanish here.
+     * `--sidebar-primary` is the active-nav accent (the item's edge bar
+     * and active icon) — a #1362FE blue per the design direction, no
+     * longer the brand crimson, which keeps red for genuine critical
+     * states elsewhere.
      */
-    --sidebar: #021D2C;
-    --sidebar-foreground: #F7F7F5;
-    --sidebar-primary: #EB1B1D;
+    --sidebar: #FEFFFE;
+    --sidebar-foreground: #0E2632;
+    --sidebar-primary: #1362FE;
     --sidebar-primary-foreground: #F7F7F5;
-    --sidebar-accent: rgba(247, 247, 245, 0.08);
-    --sidebar-accent-foreground: #F7F7F5;
-    --sidebar-border: rgba(247, 247, 245, 0.1);
-    --sidebar-ring: rgba(247, 247, 245, 0.4);
+    --sidebar-accent: rgba(14, 38, 50, 0.06);
+    --sidebar-accent-foreground: #0E2632;
+    --sidebar-border: rgba(14, 38, 50, 0.1);
+    --sidebar-ring: rgba(14, 38, 50, 0.4);
     /*
      * KPI cards (StatBlock) float on this shadow instead of a ring/border
      * — tinted to Blue Obsidian rather than pure black (design-taste-

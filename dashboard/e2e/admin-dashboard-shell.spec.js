@@ -74,21 +74,60 @@ test('admin dashboard shell renders for a real admin session, dispatcher console
   await expect(page.getByText('Registered Users')).toBeVisible()
   await expect(page.getByText('Verified Responders')).toBeVisible()
   await expect(page.getByText('False Alarm Rate')).toBeVisible()
+  // Pending responder verification is deliberately not a KPI card — it
+  // surfaces only as the action strip inside Recent Activity (whose text
+  // "N pending responder verifications" is asserted below).
+  await expect(page.getByText('Pending Responder Verification', { exact: true })).toHaveCount(0)
   await expect(page.getByText('Incidents by trigger source')).toBeVisible()
   await expect(page.getByText('Time to dispatch')).toBeVisible()
   await expect(page.getByText('Incidents by barangay')).toBeVisible()
-  await expect(page.getByText('Responder verification queue')).toBeVisible()
-  await expect(page.getByText('Ederlyn Reyes')).toBeVisible()
-  await expect(page.getByText('Recent administrative activity')).toBeVisible()
+  await expect(page.getByText('System health')).toBeVisible()
+  await expect(page.getByRole('img', { name: /System health score/ })).toBeVisible()
+  // Responder queue + admin activity + status transitions are now one
+  // unified, searchable/filterable/sortable Recent Activity table.
+  await expect(page.getByRole('heading', { name: 'Administrative Activity' })).toBeVisible()
+  await expect(page.getByText('Recent Activity')).toBeVisible()
+  await expect(page.getByRole('link', { name: 'View audit logs' })).toBeVisible()
+  await expect(page.getByPlaceholder('Search activity...')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Columns' })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^Filter/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Sort' })).toBeVisible()
+  await expect(page.getByRole('cell', { name: 'Incident → Resolved' })).toBeVisible()
 
-  // Date-range control drives the two time-series charts. Recharts
-  // animates the transition between old and new data (kept on purpose,
-  // not disabled — see IncidentTrendChart.jsx) — wait for it to settle
-  // before reading/screenshotting final values, past its ~1500ms default
-  // duration, rather than capturing a mid-transition interpolated frame.
-  await page.getByRole('button', { name: 'Last 30 days' }).click()
-  await page.getByRole('menuitem', { name: 'Last 7 days' }).click()
-  await expect(page.getByRole('button', { name: 'Last 7 days' })).toBeVisible()
+  // Search narrows the table on local state alone.
+  await page.getByPlaceholder('Search activity...').fill('INC-1039')
+  await expect(page.getByRole('cell', { name: 'Incident → Resolved' })).toBeVisible()
+  await expect(page.getByRole('cell', { name: 'Responder account approved' })).toHaveCount(0)
+  await page.getByPlaceholder('Search activity...').clear()
+  await expect(page.getByRole('cell', { name: 'Responder account approved' })).toBeVisible()
+
+  // Columns can be reordered from the keyboard (Arrow keys on a header).
+  const headerText = () => page.locator('section[aria-label="Administrative activity"] thead th').allInnerTexts()
+  expect((await headerText()).map((t) => t.trim())).toEqual(['TYPE', 'ACTIVITY', 'REFERENCE', 'BY', 'TIME'])
+  await page
+    .locator('section[aria-label="Administrative activity"] thead th')
+    .filter({ hasText: 'By' })
+    .focus()
+  await page.keyboard.press('ArrowLeft')
+  expect((await headerText()).map((t) => t.trim())).toEqual(['TYPE', 'ACTIVITY', 'BY', 'REFERENCE', 'TIME'])
+
+  // The period control (Day / Week / Month / Year) drives the time-series
+  // charts; Week is selected by default. Both Chart.js and Recharts
+  // animate the data transition, so wait for it to settle (past the
+  // ~1500ms default) before reading/screenshotting final values.
+  await expect(page.getByRole('button', { name: 'Week' })).toHaveAttribute('aria-pressed', 'true')
+  await page.getByRole('button', { name: 'Month' }).click()
+  await expect(page.getByRole('button', { name: 'Month' })).toHaveAttribute('aria-pressed', 'true')
+
+  // The calendar pill is a view of the active preset's window, not an
+  // independent default — switching presets must change what it shows,
+  // and exactly one segment is highlighted at a time.
+  const rangePill = page.getByRole('button', { name: /^Date range:/ })
+  const monthPillText = await rangePill.innerText()
+  await page.getByRole('button', { name: 'Week' }).click()
+  await expect(page.getByRole('button', { name: 'Week' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByRole('button', { name: 'Month' })).toHaveAttribute('aria-pressed', 'false')
+  expect(await rangePill.innerText()).not.toBe(monthPillText)
   await page.waitForTimeout(1800)
 
   // AdminLayout's content area scrolls inside its own <main> (h-svh +
@@ -107,9 +146,10 @@ test('admin dashboard shell renders for a real admin session, dispatcher console
   await page.waitForURL('/admin/users')
   await expect(page.getByText(/coming in a later phase/)).toBeVisible()
 
-  // Back to the dispatcher console still works.
-  await page.getByRole('link', { name: 'Dispatch console' }).click()
-  await page.waitForURL('/')
+  // The admin sidebar no longer carries an in-rail link back to the
+  // dispatcher console (removed by design), but the console route itself
+  // is unchanged and still renders for an admin session.
+  await page.goto('/')
   await expect(page.locator('.maplibregl-map')).toBeVisible()
 })
 
@@ -128,7 +168,7 @@ test('admin dashboard is usable at tablet and mobile widths', async ({ page }) =
   // screenshot above — size tall enough to fit everything in one shot.
   await page.setViewportSize({ width: 834, height: 2700 })
   await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
-  await expect(page.getByText('Responder verification queue')).toBeVisible()
+  await expect(page.getByText('Recent Activity')).toBeVisible()
   await page.screenshot({ path: `${SCREENSHOT_DIR}/admin-overview-tablet.png` })
 
   await page.setViewportSize({ width: 390, height: 3400 })
